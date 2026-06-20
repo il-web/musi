@@ -1,0 +1,51 @@
+# musi boot splash — centered logo (gentle pulse) + three sequential dots.
+# Background: musi near-black (#0a0a0f → 10,10,15 → ~0.039).
+
+Window.SetBackgroundTopColor(0.039, 0.039, 0.059);
+Window.SetBackgroundBottomColor(0.039, 0.039, 0.059);
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+
+# ── logo ────────────────────────────────────────────────────────────
+logo.image  = Image("musi-logo.png");
+logo.sprite = Sprite(logo.image);
+logo.w = logo.image.GetWidth();
+logo.h = logo.image.GetHeight();
+logo.sprite.SetX(sw / 2 - logo.w / 2);
+logo.sprite.SetY(sh / 2 - logo.h / 2 - 24);
+logo.sprite.SetZ(10);
+
+# ── loading dots ────────────────────────────────────────────────────
+dot.image = Image("dot.png");
+dot.w     = dot.image.GetWidth();
+ndots     = 3;
+spacing   = 26;
+dots_y    = sh / 2 + 48;
+x0        = sw / 2 - ((ndots - 1) * spacing) / 2 - dot.w / 2;
+
+for (i = 0; i < ndots; i++) {
+    dots[i] = Sprite(dot.image);
+    dots[i].SetX(x0 + i * spacing);
+    dots[i].SetY(dots_y);
+    dots[i].SetZ(10);
+    dots[i].SetOpacity(0.3);
+}
+
+# ── animation ───────────────────────────────────────────────────────
+t = 0;
+fun refresh() {
+    t++;
+    # logo: gentle opacity pulse 0.75 → 1.0
+    logo.sprite.SetOpacity(0.78 + 0.22 * (0.5 + 0.5 * Math.Sin(t / 16)));
+    # dots: travelling wave of brightness
+    for (i = 0; i < ndots; i++) {
+        o = 0.5 + 0.5 * Math.Sin(t / 9 - i * 1.1);
+        dots[i].SetOpacity(0.25 + 0.75 * o);
+    }
+}
+Plymouth.SetRefreshFunction(refresh);
+
+# Hide any boot/status messages — keep it clean.
+fun message() { }
+Plymouth.SetMessageFunction(message);

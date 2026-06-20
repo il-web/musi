@@ -1,0 +1,16 @@
+[Unit]
+Description=musi player UI
+# Start after the user MPD is up; the app's loading screen waits for MPD anyway.
+After=mpd.service
+Wants=mpd.service
+
+[Service]
+# run.sh self-detects the SPI panel's DRM card and the music dir.
+ExecStart=/bin/bash %h/musi/run.sh
+Restart=always
+RestartSec=3
+# Quit the boot splash once the UI process is up (first frame ~imminent).
+ExecStartPost=-/bin/sh -c 'plymouth quit --retain-splash 2>/dev/null || true'
+
+[Install]
+WantedBy=default.target
