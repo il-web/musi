@@ -1,0 +1,30 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+art_cache/
+music/
+.env
+
+# local dev artifacts (machine-specific)
+dev.env
+dev_art/
+.superpowers/
+.ui-capture/
+.vscode/
+
+# MPD runtime files
+mpd/state
+mpd/log
+mpd/database
+mpd/sticker.sql
+mpd/pid
+mpd/playlists/
+mpd/

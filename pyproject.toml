@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "musi"
+version = "0.1.0"
+description = "iPod-style music player for Raspberry Pi Zero 2 W"
+requires-python = ">=3.11"
+dependencies = [
+    "pygame-ce>=2.4.0",
+    "python-mpd2>=3.1.0",
+    "mutagen>=1.47.0",
+    "Pillow>=10.0.0",
+    "flask>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[project.scripts]
+musi-player = "musi.player.__main__:main"
+musi-library = "musi.library.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

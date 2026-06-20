@@ -1,0 +1,28 @@
+[Unit]
+Description=musi player UI
+After=network.target mpd.service sound.target graphical.target
+Wants=mpd.service
+
+[Service]
+User=pi
+Group=video
+WorkingDirectory=/home/pi/musi
+
+# SDL2 — use KMS/DRM for direct framebuffer output (Raspberry Pi OS Bookworm)
+# Change to SDL_VIDEODRIVER=fbcon if using an older Pi OS or fbcp-ili9341
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_RENDER_DRIVER=software
+Environment=SDL_MOUSE_RELATIVE=0
+Environment=MUSI_MUSIC_ROOT=/home/pi/Music
+# Point at the correct framebuffer if you have multiple (e.g. fbcp drives fb1)
+# Environment=SDL_FBDEV=/dev/fb1
+
+ExecStart=/home/pi/musi/.venv/bin/python -m musi.player
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=musi
+
+[Install]
+WantedBy=multi-user.target
