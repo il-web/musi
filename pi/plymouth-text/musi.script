@@ -1,0 +1,26 @@
+# musi boot splash — TEXT ONLY (no image files needed).
+# Renders the word "musi" centered on the near-black brand background, with a
+# gentle opacity pulse. Used to diagnose / as a lightweight splash.
+
+Window.SetBackgroundTopColor(0.039, 0.039, 0.059);
+Window.SetBackgroundBottomColor(0.039, 0.039, 0.059);
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+
+# White "musi" wordmark rendered by Plymouth itself (no PNG).
+logo.image  = Image.Text("musi", 1, 1, 1, 1, "Sans Bold 56");
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(sw / 2 - logo.image.GetWidth()  / 2);
+logo.sprite.SetY(sh / 2 - logo.image.GetHeight() / 2);
+logo.sprite.SetZ(10);
+
+t = 0;
+fun refresh() {
+    t++;
+    logo.sprite.SetOpacity(0.75 + 0.25 * (0.5 + 0.5 * Math.Sin(t / 16)));
+}
+Plymouth.SetRefreshFunction(refresh);
+
+fun message() { }
+Plymouth.SetMessageFunction(message);

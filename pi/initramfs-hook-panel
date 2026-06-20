@@ -1,0 +1,19 @@
+#!/bin/sh
+# initramfs hook: bundle the ST7796 panel init firmware (panel.bin) into the
+# initramfs so the SPI display works during the EARLY boot splash. Without this,
+# panel-mipi-dbi can't initialize the panel before the root fs is mounted, and
+# the Plymouth boot splash renders to a fallback instead of the panel.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# the compiled ST7796 init sequence used by the mipi-dbi-spi overlay
+copy_file firmware /lib/firmware/panel.bin
+
+# make sure the panel + SPI DRM modules are in the initramfs too
+manual_add_modules panel_mipi_dbi 2>/dev/null || true
+manual_add_modules mipi_dbi       2>/dev/null || true
