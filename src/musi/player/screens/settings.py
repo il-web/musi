@@ -8,7 +8,7 @@ from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
-MENU   = ["Bluetooth", "WiFi", "About"]
+MENU   = ["Bluetooth", "WiFi", "Updates"]
 ITEM_H = 80          # card height
 NAV_Y  = 456
 
@@ -94,7 +94,9 @@ class SettingsScreen(Screen):
         elif self._sel == 1:
             from musi.player.screens.wifi import WifiScreen
             self.app.push(WifiScreen(self.app))
-        # elif self._sel == 2: About screen — future
+        elif self._sel == 2:
+            from musi.player.screens.updates import UpdatesScreen
+            self.app.push(UpdatesScreen(self.app))
 
 
 # ── icon helpers ──────────────────────────────────────────────────────────────
@@ -116,10 +118,11 @@ def _draw_icon(surface, index, cx, cy, col):
                         cy + 3 - int(r * math.sin(math.pi * (0.5 + 0.45 * t / 10))))
                        for t in range(-10, 11)]
                 pygame.draw.lines(surface, col, False, pts, 2)
-    elif index == 2:  # About — info circle
-        pygame.draw.circle(surface, col, (cx, cy), 8, 2)
-        pygame.draw.line(surface, col, (cx, cy - 1), (cx, cy + 4), 2)
-        pygame.draw.circle(surface, col, (cx, cy - 4), 1)
+    elif index == 2:  # Updates — download arrow into a tray
+        pygame.draw.line(surface, col, (cx, cy - 8), (cx, cy + 2), 2)
+        pygame.draw.lines(surface, col, False,
+                          [(cx - 4, cy - 2), (cx, cy + 2), (cx + 4, cy - 2)], 2)
+        pygame.draw.line(surface, col, (cx - 6, cy + 6), (cx + 6, cy + 6), 2)
 
 
 def _chevron(surface, cx, cy, col):
