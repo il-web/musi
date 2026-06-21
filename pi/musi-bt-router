@@ -9,9 +9,12 @@ MON="$(command -v bluealsactl || command -v bluealsa-cli)"
 rm -f "$FLAG" 2>/dev/null
 
 dac_dev() {
-  n="$(aplay -l 2>/dev/null | sed -n 's/^card \([0-9]\).*[Hh]ifiberry.*/\1/p' | head -1)"
-  [ -z "$n" ] && n=0
-  echo "hw:$n,0"
+  # Reference the DAC by its stable card NAME, not index — the ALSA card index
+  # is not stable across boots (HDMI sometimes claims card 0, pushing the DAC to
+  # card 1), which made "hw:0,0" open HDMI and fail with ENOTSUPP (error 524).
+  id="$(aplay -l 2>/dev/null | sed -n 's/^card [0-9]*: \([^ ]*\).*[Hh]ifi[Bb]erry.*/\1/p' | head -1)"
+  [ -z "$id" ] && id="sndrpihifiberry"
+  echo "hw:$id,0"
 }
 
 write_dac() {
@@ -73,10 +76,19 @@ to_dac() {
 
 [ -z "$MON" ] && { echo "no bluealsa cli found"; exit 1; }
 
-# startup: default to DAC unless a BT device is already connected
+# startup: make sure ~/.asoundrc names the right output, but only restart MPD if
+# it actually needs to change. On a normal boot the file is already correct, so
+# we must NOT restart MPD here — doing so races the app's startup MPD connection.
 start_mac="$(remaining_bt)"
-if [ -n "$start_mac" ]; then write_bt "$start_mac"; else write_dac; fi
-restart_mpd
+if [ -n "$start_mac" ]; then
+  start_target="bluealsa:DEV=$start_mac,PROFILE=a2dp"
+else
+  start_target="$(dac_dev)"
+fi
+if [ "$(current_target)" != "$start_target" ]; then
+  if [ -n "$start_mac" ]; then write_bt "$start_mac"; else write_dac; fi
+  restart_mpd
+fi
 
 "$MON" monitor 2>/dev/null | while read -r line; do
   case "$line" in

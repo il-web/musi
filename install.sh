@@ -74,13 +74,14 @@ audio_output {
     mixer_type  "software"
 }
 EOF
-# Default audio route → the DAC (hw card containing "hifiberry"; else card 0).
-DAC_CARD="$(aplay -l 2>/dev/null | sed -n 's/^card \([0-9]\).*[Hh]ifiberry.*/\1/p' | head -1)"
-[ -z "$DAC_CARD" ] && DAC_CARD=0
+# Default audio route → the DAC, referenced by stable card NAME (the ALSA index
+# is not stable across boots — HDMI can claim card 0).
+DAC_ID="$(aplay -l 2>/dev/null | sed -n 's/^card [0-9]*: \([^ ]*\).*[Hh]ifi[Bb]erry.*/\1/p' | head -1)"
+[ -z "$DAC_ID" ] && DAC_ID="sndrpihifiberry"
 cat > "$HOME/.asoundrc" <<EOF
 pcm.musiout {
     type plug
-    slave.pcm "hw:$DAC_CARD,0"
+    slave.pcm "hw:$DAC_ID,0"
 }
 EOF
 
