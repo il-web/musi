@@ -86,6 +86,8 @@ class PowerScreen(Screen):
         self._msg = "Shutting down…" if action == "shutdown" else "Rebooting…"
         self._pending = None
         try:
-            subprocess.Popen(["sudo", "systemctl", verb], start_new_session=True)
+            # -i (--ignore-inhibitors) forces it through immediately instead of
+            # waiting on logind inhibitor locks (which made it feel "scheduled").
+            subprocess.Popen(["sudo", "systemctl", verb, "-i"], start_new_session=True)
         except Exception as exc:
             self._msg = f"Failed: {exc}"

@@ -154,7 +154,7 @@ echo "        /boot/firmware/cmdline.txt (one line) for the splash at boot."
 
 # ── 9b. power controls (Settings → Power) ─────────────────────────────────────
 say "[9b] Power-off / reboot permission"
-echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot" \
+echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i" \
     | sudo tee /etc/sudoers.d/musi-power > /dev/null
 sudo chmod 0440 /etc/sudoers.d/musi-power
 
