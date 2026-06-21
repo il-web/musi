@@ -26,6 +26,7 @@ class UpdatesScreen(Screen):
         self._busy:   bool = False
         self._msg:    str  = ""
         self._hdr:    pygame.Surface | None = None
+        self._beta:   pygame.Surface | None = None
 
     def on_enter(self) -> None:
         # Show the current version immediately; check the remote in the background.
@@ -64,12 +65,21 @@ class UpdatesScreen(Screen):
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
         if self._hdr is None:
-            self._hdr = theme.render("Updates", 16, theme.WHITE, bold=True)
+            self._hdr  = theme.render("musi OS", 30, theme.WHITE, bold=True)
+            self._beta = theme.render("beta", 12, theme.ACCENT, bold=True)
 
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_back=len(self.app.stack) > 1)
-        surface.blit(self._hdr, (14, 26))
+
+        # title: "musi OS" big, with a small "beta" tag baseline-aligned next to it
+        hx, hy = 14, 34
+        surface.blit(self._hdr, (hx, hy))
+        surface.blit(
+            self._beta,
+            (hx + self._hdr.get_width() + 8,
+             hy + self._hdr.get_height() - self._beta.get_height() - 6),
+        )
 
         st = self._status
         cur = st.current if st else "?"
