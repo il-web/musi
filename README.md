@@ -107,7 +107,6 @@ repo and restarts.
 - `src/musi/wifi_transfer/` — browser-based upload server
 - `pi/` — services, MPD config, Bluetooth/DAC audio router, pairing agent,
   optional boot splash
-- `docs/` — design specs
 
 ---
 

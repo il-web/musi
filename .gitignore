@@ -28,3 +28,7 @@ mpd/sticker.sql
 mpd/pid
 mpd/playlists/
 mpd/
+
+# local-only (kept on dev machine, not published)
+3D model/
+docs/superpowers/
