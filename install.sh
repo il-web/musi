@@ -1,169 +1,175 @@
 #!/bin/bash
-# musi install script for Raspberry Pi
-# Run from the project directory: bash install.sh
-# Tested on Raspberry Pi OS Bookworm (64-bit), Pi Zero 2 W / Pi 3 / Pi 4
+# musi OS installer — software setup for the touchscreen music player.
+#
+# Run from a checkout on the Pi:   cd ~/musi && bash install.sh
+#
+# This configures the SOFTWARE stack: MPD, the player app, audio routing
+# (DAC + Bluetooth via bluez-alsa), Bluetooth pairing agent + AVRCP, the boot
+# splash, and the auto-start service.
+#
+# PREREQUISITES (hardware enablement — do these first, see README §2–3):
+#   - SPI display wired + /boot/firmware/config.txt overlays + /lib/firmware/panel.bin
+#   - I2C touch overlay installed
+#   - I2S DAC wired (optional)
+#
+# Idempotent: safe to re-run. Assembled from the verified per-step setup;
+# this clean-install path is new — please report issues.
+set -u
 
-set -e
+USER_NAME="$(id -un)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MUSIC_DIR="$HOME/Music"
-DATA_DIR="$HOME/.local/share/musi"
-MPD_PLAYLIST_DIR="$HOME/.mpd/playlists"
+MUSIC_DIR="$HOME/music"
 
-echo "=== musi installer ==="
-echo "Project: $SCRIPT_DIR"
-echo "Music:   $MUSIC_DIR"
-echo ""
+say() { printf '\n\033[1;35m=== %s\033[0m\n' "$1"; }
 
-# ── 1. system packages ────────────────────────────────────────────────────────
-echo "[1/7] Installing system packages..."
+# ── 1. packages ───────────────────────────────────────────────────────────────
+say "[1/10] Installing packages"
 sudo apt-get update -qq
-sudo apt-get install -y \
-    mpd \
+sudo apt-get install -y --no-install-recommends \
+    git mpd mpc \
     python3 python3-pip python3-venv \
     fonts-dejavu-core \
-    libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-    avahi-daemon \
-    libjpeg-dev libpng-dev \
-    network-manager \
-    --no-install-recommends
+    libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-mixer-2.0-0 \
+    bluez bluez-tools bluez-alsa-utils \
+    plymouth plymouth-themes \
+    i2c-tools device-tree-compiler \
+    avahi-daemon
 
-# ── 2. Python virtual environment ─────────────────────────────────────────────
-echo "[2/7] Creating Python virtual environment..."
+# ── 2. python app ─────────────────────────────────────────────────────────────
+say "[2/10] Python virtual environment"
 python3 -m venv "$SCRIPT_DIR/.venv" --system-site-packages
 "$SCRIPT_DIR/.venv/bin/pip" install --quiet --upgrade pip
-"$SCRIPT_DIR/.venv/bin/pip" install --quiet -e "$SCRIPT_DIR[dev]"
+"$SCRIPT_DIR/.venv/bin/pip" install --quiet -e "$SCRIPT_DIR"
 
-# ── 3. directories ────────────────────────────────────────────────────────────
-echo "[3/7] Creating directories..."
-mkdir -p "$MUSIC_DIR"
-mkdir -p "$DATA_DIR"
-mkdir -p "$MPD_PLAYLIST_DIR"
+# ── 3. groups + radios ────────────────────────────────────────────────────────
+say "[3/10] User groups and Bluetooth radio"
+for g in audio video render input bluetooth gpio i2c spi netdev; do
+    sudo usermod -aG "$g" "$USER_NAME" 2>/dev/null || true
+done
+sudo rfkill unblock bluetooth 2>/dev/null || true
+sudo systemctl enable --now bluetooth 2>/dev/null || true
 
-# ── 4. MPD configuration ──────────────────────────────────────────────────────
-echo "[4/7] Configuring MPD..."
+# ── 4. directories ────────────────────────────────────────────────────────────
+say "[4/10] Directories"
+mkdir -p "$MUSIC_DIR" "$HOME/.config/mpd/playlists" "$HOME/.local/bin" \
+         "$HOME/.config/systemd/user"
 
-# Stop system MPD first so we can replace its config
-sudo systemctl stop mpd 2>/dev/null || true
-
-# Write MPD config (substituting actual home dir)
-sudo tee /etc/mpd.conf > /dev/null << EOF
+# ── 5. MPD as a user service ──────────────────────────────────────────────────
+say "[5/10] MPD (user service, output via switchable ALSA device)"
+sudo systemctl mask mpd.service mpd.socket 2>/dev/null || true
+cat > "$HOME/.config/mpd/mpd.conf" <<EOF
 music_directory     "$MUSIC_DIR"
-playlist_directory  "$MPD_PLAYLIST_DIR"
-db_file             "$DATA_DIR/mpd.db"
-log_file            "$DATA_DIR/mpd.log"
-state_file          "$DATA_DIR/mpd.state"
-sticker_database    "$DATA_DIR/mpd.sticker.db"
-
+playlist_directory  "$HOME/.config/mpd/playlists"
+db_file             "$HOME/.config/mpd/database"
+state_file          "$HOME/.config/mpd/state"
+sticker_file        "$HOME/.config/mpd/sticker.sql"
 bind_to_address     "127.0.0.1"
 port                "6600"
-
-user                "pi"
-group               "audio"
-
 auto_update         "yes"
-auto_update_depth   "3"
-
-replaygain          "auto"
-
+restore_paused      "yes"
 audio_output {
     type        "alsa"
-    name        "PCM5102A DAC"
-    device      "hw:0,0"
+    name        "musi out"
+    device      "musiout"
     mixer_type  "software"
 }
 EOF
-
-# Make pi user a member of audio group
-sudo usermod -aG audio pi 2>/dev/null || true
-sudo usermod -aG video pi 2>/dev/null || true
-
-# ── 5. systemd service ────────────────────────────────────────────────────────
-echo "[5/7] Installing systemd service..."
-
-sudo tee /etc/systemd/system/musi.service > /dev/null << EOF
-[Unit]
-Description=musi player UI
-After=network.target mpd.service sound.target
-Wants=mpd.service
-
-[Service]
-User=pi
-Group=video
-WorkingDirectory=$SCRIPT_DIR
-Environment=SDL_VIDEODRIVER=kmsdrm
-Environment=SDL_RENDER_DRIVER=software
-Environment=SDL_MOUSE_RELATIVE=0
-Environment=MUSI_MUSIC_ROOT=$MUSIC_DIR
-ExecStart=$SCRIPT_DIR/.venv/bin/python -m musi.player
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=musi
-
-[Install]
-WantedBy=multi-user.target
+# Default audio route → the DAC (hw card containing "hifiberry"; else card 0).
+DAC_CARD="$(aplay -l 2>/dev/null | sed -n 's/^card \([0-9]\).*[Hh]ifiberry.*/\1/p' | head -1)"
+[ -z "$DAC_CARD" ] && DAC_CARD=0
+cat > "$HOME/.asoundrc" <<EOF
+pcm.musiout {
+    type plug
+    slave.pcm "hw:$DAC_CARD,0"
+}
 EOF
 
+# ── 6. Bluetooth audio (bluez-alsa) ───────────────────────────────────────────
+say "[6/10] Bluetooth audio (bluez-alsa) + pairing agent"
+sudo systemctl enable --now bluealsa 2>/dev/null || true
+# Persistent auto-accept pairing agent (so the app can pair new devices).
+sudo tee /etc/systemd/system/bt-agent.service > /dev/null <<EOF
+[Unit]
+Description=Bluetooth auto-pairing agent
+After=bluetooth.service
+Requires=bluetooth.service
+[Service]
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/bt-agent --capability=NoInputNoOutput
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=bluetooth.target
+EOF
 sudo systemctl daemon-reload
-sudo systemctl enable mpd
-sudo systemctl start  mpd
-sudo systemctl enable musi
+sudo systemctl enable --now bt-agent 2>/dev/null || true
 
-# ── 6. mDNS hostname (musi.local) ────────────────────────────────────────────
-echo "[6/7] Configuring mDNS..."
+# ── 7. audio auto-router (DAC <-> Bluetooth) ──────────────────────────────────
+say "[7/10] Audio auto-router"
+install -m 0755 "$SCRIPT_DIR/pi/musi-bt-router" "$HOME/.local/bin/musi-bt-router"
+sed -i 's/\r$//' "$HOME/.local/bin/musi-bt-router"
+cat > "$HOME/.config/systemd/user/musi-bt-router.service" <<EOF
+[Unit]
+Description=musi Bluetooth/DAC audio auto-router
+After=bluetooth.service mpd.service
+[Service]
+ExecStart=/bin/bash %h/.local/bin/musi-bt-router
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+EOF
+
+# ── 8. AVRCP (headphone media buttons -> MPD) ─────────────────────────────────
+say "[8/10] AVRCP media-button control"
+sudo apt-get install -y --no-install-recommends mpdris2 2>/dev/null || true
+cat > "$HOME/.config/systemd/user/mpris-proxy.service" <<EOF
+[Unit]
+Description=Bluetooth AVRCP to MPRIS proxy
+After=bluetooth.service
+[Service]
+ExecStart=/usr/bin/mpris-proxy
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+EOF
+
+# ── 9. boot splash (Plymouth) ─────────────────────────────────────────────────
+say "[9/10] Boot splash"
+sudo mkdir -p /usr/share/plymouth/themes/musi
+sudo cp "$SCRIPT_DIR"/pi/plymouth-text/* /usr/share/plymouth/themes/musi/
+sudo cp "$SCRIPT_DIR/pi/initramfs-hook-panel" /etc/initramfs-tools/hooks/panel-firmware
+sudo sed -i 's/\r$//' /etc/initramfs-tools/hooks/panel-firmware
+sudo chmod +x /etc/initramfs-tools/hooks/panel-firmware
+echo 'export FRAMEBUFFER=/dev/fb1' | sudo tee /etc/initramfs-tools/conf.d/fb1 > /dev/null
+grep -q '^panel-mipi-dbi' /etc/initramfs-tools/modules 2>/dev/null || \
+    printf 'spi-bcm2835\npanel-mipi-dbi\nmipi-dbi\n' | sudo tee -a /etc/initramfs-tools/modules > /dev/null
+sudo sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf 2>/dev/null || true
+sudo plymouth-set-default-theme musi 2>/dev/null || true
+sudo update-initramfs -u 2>/dev/null || true
+echo "  NOTE: add 'quiet splash plymouth.ignore-serial-consoles fbcon=map:10' to"
+echo "        /boot/firmware/cmdline.txt (one line) for the splash at boot."
+
+# ── 10. services + autostart ──────────────────────────────────────────────────
+say "[10/10] Enabling services + autostart"
+install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"
+loginctl enable-linger "$USER_NAME" 2>/dev/null || true
+systemctl --user daemon-reload
+systemctl --user enable mpd musi-bt-router mpris-proxy musi-ui 2>/dev/null || true
 sudo hostnamectl set-hostname musi 2>/dev/null || true
-sudo systemctl enable avahi-daemon
-sudo systemctl start  avahi-daemon
+sudo systemctl enable --now avahi-daemon 2>/dev/null || true
 
-# ── 7. display driver reminder ────────────────────────────────────────────────
-echo "[7/7] Display setup..."
-cat << 'DISPLAY_NOTE'
+say "Done"
+cat <<EOF
 
-  ┌─────────────────────────────────────────────────────────────┐
-  │  DISPLAY DRIVER — manual step required                      │
-  │                                                             │
-  │  Add the following to /boot/firmware/config.txt             │
-  │  (or /boot/config.txt on older Pi OS):                      │
-  │                                                             │
-  │    dtparam=spi=on                                           │
-  │    dtparam=i2s=on                                           │
-  │    dtoverlay=hifiberry-dac          # PCM5102A audio        │
-  │                                                             │
-  │  For the ST7796 / ILI9488 3.5" SPI display, use your       │
-  │  display vendor's driver.  Common options:                  │
-  │                                                             │
-  │  Option A — fbcp-ili9341 (recommended for SPI displays):    │
-  │    https://github.com/juj/fbcp-ili9341                      │
-  │    Then change SDL_VIDEODRIVER=fbcon in musi.service        │
-  │    and set SDL_FBDEV=/dev/fb1                               │
-  │                                                             │
-  │  Option B — waveshare/goodtft driver (if your display       │
-  │    came with a driver package, run their install script)    │
-  │                                                             │
-  │  Option C — DRM overlay (if your display supports it):      │
-  │    dtoverlay=vc4-kms-v3d                                    │
-  │    + your display's kms overlay                             │
-  │                                                             │
-  │  After editing config.txt, run: sudo reboot                 │
-  └─────────────────────────────────────────────────────────────┘
+  musi OS software is installed.
 
-DISPLAY_NOTE
+  1. Make sure the display/touch/DAC are enabled in /boot/firmware/config.txt
+     and add the cmdline.txt splash params noted above (README §3).
+  2. Put music in $MUSIC_DIR  (or use Wi-Fi transfer once running).
+  3. Reboot:   sudo reboot
 
-# ── done ──────────────────────────────────────────────────────────────────────
-echo ""
-echo "=== Installation complete ==="
-echo ""
-echo "Next steps:"
-echo "  1. Edit /boot/firmware/config.txt for your display + audio (see above)"
-echo "  2. sudo reboot"
-echo "  3. After reboot, scan your music library:"
-echo "       cd $SCRIPT_DIR && .venv/bin/python -m musi.library"
-echo "  4. Start the player manually to test:"
-echo "       bash $SCRIPT_DIR/run.sh"
-echo "  5. Once working, the service auto-starts on every boot."
-echo ""
-echo "  Logs:    sudo journalctl -u musi -f"
-echo "  MPD:     sudo journalctl -u mpd -f"
-echo "  Re-scan: .venv/bin/python -m musi.library"
-echo ""
+  The Pi will boot straight into musi OS.
+  Logs:  journalctl --user -u musi-ui -f
+EOF
