@@ -1,7 +1,7 @@
-"""Software Update screen — check GitHub and pull the latest version.
+"""Software Update screen — check GitHub, show the changelog, and pull updates.
 
-Shows the current vs latest commit and an update count. Tap "Check" to re-query
-the remote; tap "Update now" (enabled only when behind) to pull + restart.
+Shows current vs latest commit, a "What's new" list of incoming changes, and an
+animated staged progress popup while updating.
 """
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
-CHECK_RECT  = pygame.Rect(20, 372, 130, 52)
-UPDATE_RECT = pygame.Rect(170, 372, 130, 52)
+CHECK_RECT  = pygame.Rect(20, 396, 130, 50)
+UPDATE_RECT = pygame.Rect(170, 396, 130, 50)
+LOG_Y       = 198          # top of the "What's new" list
+LOG_BOTTOM  = 388
 
 
 class UpdatesScreen(Screen):
@@ -27,9 +29,13 @@ class UpdatesScreen(Screen):
         self._msg:    str  = ""
         self._hdr:    pygame.Surface | None = None
         self._beta:   pygame.Surface | None = None
+        # update progress popup
+        self._updating:   bool  = False
+        self._prog:       float = 0.0   # target fraction
+        self._prog_shown: float = 0.0   # animated (eased) fraction
+        self._prog_label: str   = ""
 
     def on_enter(self) -> None:
-        # Show the current version immediately; check the remote in the background.
         self._status = updater.UpdateStatus(current=updater.current_version())
         self._check()
 
@@ -52,12 +58,21 @@ class UpdatesScreen(Screen):
         if self._busy or not (self._status and self._status.available):
             return
         self._busy = True
-        self._msg  = "Updating… do not power off"
+        self._updating   = True
+        self._prog       = 0.0
+        self._prog_shown = 0.0
+        self._prog_label = "Starting…"
+
+        def cb(frac: float, label: str) -> None:
+            self._prog       = frac
+            self._prog_label = label
 
         def work() -> None:
-            ok, message = updater.apply()      # on success this restarts the app
-            self._msg  = message if ok else f"Failed: {message}"
-            self._busy = False
+            ok, message = updater.apply(cb)     # on success this restarts the app
+            if not ok:
+                self._updating = False
+                self._busy     = False
+                self._msg      = f"Failed: {message}"
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -72,22 +87,17 @@ class UpdatesScreen(Screen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_back=len(self.app.stack) > 1)
 
-        # title: "musi OS" big, with a small "beta" tag baseline-aligned next to it
         hx, hy = 14, 34
         surface.blit(self._hdr, (hx, hy))
-        surface.blit(
-            self._beta,
-            (hx + self._hdr.get_width() + 8,
-             hy + self._hdr.get_height() - self._beta.get_height() - 6),
-        )
+        surface.blit(self._beta,
+                     (hx + self._hdr.get_width() + 8,
+                      hy + self._hdr.get_height() - self._beta.get_height() - 6))
 
-        st = self._status
+        st  = self._status
         cur = st.current if st else "?"
         lat = st.latest  if st else "?"
-
-        # version rows
-        self._row(surface, 78,  "Current", cur, theme.WHITE)
-        self._row(surface, 116, "Latest",  lat, theme.WHITE)
+        self._row(surface, 80,  "Current", cur)
+        self._row(surface, 116, "Latest",  lat)
 
         # status line
         if st and st.error:
@@ -100,21 +110,73 @@ class UpdatesScreen(Screen):
         else:
             line, col = "—", theme.DIM
         s = theme.render(line, 13, col, max_width=300)
-        surface.blit(s, s.get_rect(centerx=160, y=176))
+        surface.blit(s, s.get_rect(centerx=160, y=164))
 
-        if self._msg:
-            m = theme.render(self._msg, 12, theme.WHITE, max_width=300)
-            surface.blit(m, m.get_rect(centerx=160, y=210))
+        # "What's new" changelog
+        if st and st.available and st.changelog:
+            self._draw_changelog(surface, st.changelog)
 
         # buttons
         self._button(surface, CHECK_RECT, "Check", enabled=not self._busy)
         can_update = bool(st and st.available) and not self._busy
         self._button(surface, UPDATE_RECT, "Update now", enabled=can_update, accent=can_update)
 
-    def _row(self, surface, y, label, value, col):
+        if self._msg and not self._updating:
+            m = theme.render(self._msg, 12, theme.WHITE, max_width=300)
+            surface.blit(m, m.get_rect(centerx=160, y=458))
+
+        # progress popup (modal) — drawn last, over everything
+        if self._updating:
+            self._draw_progress(surface)
+
+    def _draw_changelog(self, surface, log: list[str]) -> None:
+        title = theme.render("What's new", 11, theme.DIM, bold=True)
+        surface.blit(title, (20, LOG_Y))
+        y = LOG_Y + 20
+        line_h = 19
+        shown = 0
+        for msg in log:
+            if y + line_h > LOG_BOTTOM:
+                remaining = len(log) - shown
+                more = theme.render(f"+{remaining} more…", 10, theme.DIM)
+                surface.blit(more, (28, y))
+                break
+            dot = theme.render("•", 12, theme.ACCENT)
+            surface.blit(dot, (20, y))
+            ln = theme.render(msg, 11, theme.WHITE, max_width=280)
+            surface.blit(ln, (32, y))
+            y += line_h
+            shown += 1
+
+    def _draw_progress(self, surface) -> None:
+        # ease the visible bar toward the target each frame
+        self._prog_shown += (self._prog - self._prog_shown) * 0.18
+
+        dim = pygame.Surface((320, 480), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 185))
+        surface.blit(dim, (0, 0))
+
+        box = pygame.Rect(0, 0, 280, 132)
+        box.center = (160, 240)
+        pygame.draw.rect(surface, theme.CARD_BG, box, border_radius=14)
+
+        title = theme.render("Updating", 16, theme.WHITE, bold=True)
+        surface.blit(title, title.get_rect(centerx=160, y=box.y + 18))
+        lbl = theme.render(self._prog_label, 12, theme.ACCENT, max_width=250)
+        surface.blit(lbl, lbl.get_rect(centerx=160, y=box.y + 48))
+
+        bx, by, bw, bh = box.x + 24, box.y + 80, box.width - 48, 8
+        pygame.draw.rect(surface, (40, 40, 56), (bx, by, bw, bh), border_radius=4)
+        fill = max(0, min(bw, int(bw * self._prog_shown)))
+        if fill > 0:
+            pygame.draw.rect(surface, theme.ACCENT, (bx, by, fill, bh), border_radius=4)
+        pct = theme.render(f"{int(self._prog_shown * 100)}%", 10, theme.DIM)
+        surface.blit(pct, pct.get_rect(centerx=160, y=by + 14))
+
+    def _row(self, surface, y, label, value):
         l = theme.render(label, 12, theme.DIM)
         surface.blit(l, (24, y))
-        v = theme.render(value, 14, col, bold=True)
+        v = theme.render(value, 14, theme.WHITE, bold=True)
         surface.blit(v, (140, y - 2))
 
     def _button(self, surface, rect, label, enabled, accent=False):
@@ -131,17 +193,19 @@ class UpdatesScreen(Screen):
     # ── input ────────────────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
+        if self._updating:
+            return None        # modal — block input during update
         if y < 26:
             return Button.BACK
         if CHECK_RECT.collidepoint(x, y):
             self._check()
-            return None
-        if UPDATE_RECT.collidepoint(x, y):
+        elif UPDATE_RECT.collidepoint(x, y):
             self._update()
-            return None
         return None
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
+        if self._updating:
+            return
         if button == Button.BACK:
             self.app.pop()
         elif button == Button.SELECT:

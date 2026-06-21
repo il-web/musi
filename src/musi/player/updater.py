@@ -10,8 +10,9 @@ result dict the UI can display.
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 # Repo root = three levels above this file's package:
 #   <root>/src/musi/player/updater.py  → parents[3] == <root>
@@ -28,6 +29,7 @@ class UpdateStatus:
     behind:   int  = 0        # how many commits behind upstream
     is_repo:  bool = True     # False if not a git checkout
     error:    str  = ""       # human-readable problem, if any
+    changelog: list[str] = field(default_factory=list)  # incoming commit subjects
 
     @property
     def available(self) -> bool:
@@ -86,22 +88,39 @@ def check() -> UpdateStatus:
     rc, cnt = _git("rev-list", "--count", f"HEAD..{upstream}", timeout=10)
     if rc == 0 and cnt.isdigit():
         st.behind = int(cnt)
+
+    if st.behind > 0:
+        rc, out = _git("log", "--no-merges", "--format=%s",
+                       f"HEAD..{upstream}", timeout=10)
+        if rc == 0:
+            st.changelog = [ln for ln in out.splitlines() if ln.strip()]
     return st
 
 
-def apply() -> tuple[bool, str]:
+def apply(progress: "Callable[[float, str], None] | None" = None) -> tuple[bool, str]:
     """Pull the latest code and restart the app service. On success this restarts
     our own process, so the call effectively does not return.
+
+    ``progress`` (if given) is called with (fraction 0..1, stage label) as each
+    stage runs, for a UI progress bar.
     Returns (ok, message) only if it fails before the restart.
     """
+    def step(frac: float, label: str) -> None:
+        if progress:
+            progress(frac, label)
+
+    step(0.08, "Preparing…")
     if not _is_git_repo():
         return False, "Not a git checkout"
 
+    step(0.15, "Downloading…")
     rc, out = _git("pull", "--ff-only", timeout=120)
     if rc != 0:
         return False, out or "pull failed"
+    step(0.55, "Downloaded")
 
     # Reinstall in case dependencies/entry-points changed (best-effort, quiet).
+    step(0.60, "Installing…")
     py = REPO_DIR / ".venv" / "bin" / "pip"
     if py.exists():
         try:
@@ -111,9 +130,11 @@ def apply() -> tuple[bool, str]:
             )
         except Exception:
             pass
+    step(0.90, "Installed")
 
     # Restart the service — this terminates the current process and relaunches
     # the player on the new code. Detached so the SIGTERM doesn't pre-empt logging.
+    step(0.95, "Restarting…")
     try:
         subprocess.Popen(
             ["systemctl", "--user", "restart", SERVICE],
