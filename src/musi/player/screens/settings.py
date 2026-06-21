@@ -8,7 +8,7 @@ from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
-MENU   = ["Bluetooth", "WiFi", "Updates"]
+MENU   = ["Bluetooth", "WiFi", "Updates", "Power"]
 ITEM_H = 80          # card height
 NAV_Y  = 456
 
@@ -97,6 +97,9 @@ class SettingsScreen(Screen):
         elif self._sel == 2:
             from musi.player.screens.updates import UpdatesScreen
             self.app.push(UpdatesScreen(self.app))
+        elif self._sel == 3:
+            from musi.player.screens.power import PowerScreen
+            self.app.push(PowerScreen(self.app))
 
 
 # ── icon helpers ──────────────────────────────────────────────────────────────
@@ -123,6 +126,10 @@ def _draw_icon(surface, index, cx, cy, col):
         pygame.draw.lines(surface, col, False,
                           [(cx - 4, cy - 2), (cx, cy + 2), (cx + 4, cy - 2)], 2)
         pygame.draw.line(surface, col, (cx - 6, cy + 6), (cx + 6, cy + 6), 2)
+    elif index == 3:  # Power — power symbol (circle with top gap + stem)
+        pygame.draw.arc(surface, col, pygame.Rect(cx - 8, cy - 7, 16, 16),
+                        2.6, 0.55, 2)
+        pygame.draw.line(surface, col, (cx, cy - 9), (cx, cy - 1), 2)
 
 
 def _chevron(surface, cx, cy, col):

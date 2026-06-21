@@ -152,6 +152,12 @@ sudo update-initramfs -u 2>/dev/null || true
 echo "  NOTE: add 'quiet splash plymouth.ignore-serial-consoles fbcon=map:10' to"
 echo "        /boot/firmware/cmdline.txt (one line) for the splash at boot."
 
+# ── 9b. power controls (Settings → Power) ─────────────────────────────────────
+say "[9b] Power-off / reboot permission"
+echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot" \
+    | sudo tee /etc/sudoers.d/musi-power > /dev/null
+sudo chmod 0440 /etc/sudoers.d/musi-power
+
 # ── 10. services + autostart ──────────────────────────────────────────────────
 say "[10/10] Enabling services + autostart"
 install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"

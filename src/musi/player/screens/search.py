@@ -9,6 +9,7 @@ import pygame
 
 from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
+from musi.player.keyboard import Keyboard
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
@@ -18,8 +19,8 @@ BOX_Y   = BAR_H + 4  # search box top
 BOX_H   = 36          # search box height
 LIST_Y  = BOX_Y + BOX_H + 4   # 70 — first result top
 ITEM_H  = 54          # height per result row
-NAV_Y   = 456         # nav hint y
-MAX_VIS = (NAV_Y - LIST_Y) // ITEM_H  # ≈ 7
+KB_TOP  = 316         # on-screen keyboard docks here; results fill above it
+MAX_VIS = (KB_TOP - LIST_Y) // ITEM_H   # visible result rows above the keyboard
 
 _CURSOR_BLINK = 0.55   # seconds per blink half-cycle
 
@@ -42,6 +43,7 @@ class SearchScreen(Screen):
         self._scroll:  int           = 0
         self._scroll_px: float       = 0.0   # accumulated drag for swipe-scroll
         self._enter_t: float         = 0.0
+        self._kb = Keyboard(KB_TOP)
 
         # static surfaces (lazy)
         self._nav_surf: pygame.Surface | None = None
@@ -76,15 +78,33 @@ class SearchScreen(Screen):
     # ── touch input ──────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
-        if LIST_Y <= y < NAV_Y - 24:
-            vi = (y - LIST_Y) // ITEM_H
-            di = vi + self._scroll
+        if y < 26:
+            return Button.BACK
+        if y >= KB_TOP:                       # tap on the on-screen keyboard
+            self._on_key(self._kb.key_at(x, y))
+            return None
+        if LIST_Y <= y < KB_TOP:              # tap a result
+            di = (y - LIST_Y) // ITEM_H + self._scroll
             if 0 <= di < len(self._results):
                 self._sel = di
                 self._clamp_scroll()
                 self._play_selected()
-                return None
-        return super().handle_touch(x, y)
+        return None
+
+    def _on_key(self, key: "str | None") -> None:
+        if key is None:
+            return
+        if key == "ENTER":
+            self._play_selected()
+            return
+        if key == "BACKSPACE":
+            self._query = self._query[:-1]
+        elif key == "SPACE":
+            self._query += " "
+        elif len(key) == 1:
+            self._query += key
+        self._enter_t = time.monotonic()
+        self._search()
 
     def handle_scroll(self, dy: float) -> None:
         max_scroll = len(self._results) - MAX_VIS
@@ -171,7 +191,7 @@ class SearchScreen(Screen):
                 self._draw_result(surface, vi, di)
 
             if len(self._results) > MAX_VIS:
-                _scrollbar(surface, 314, LIST_Y, NAV_Y - LIST_Y,
+                _scrollbar(surface, 314, LIST_Y, KB_TOP - LIST_Y,
                            len(self._results), self._scroll, MAX_VIS)
 
         # ── result count (top-right of box) ───────────────────────────────────
@@ -181,9 +201,8 @@ class SearchScreen(Screen):
             cnt_s = theme.render(f"{n} {word}", 10, theme.DIM)
             surface.blit(cnt_s, cnt_s.get_rect(right=310, y=BOX_Y + 2))
 
-        # ── nav hint ──────────────────────────────────────────────────────────
-        surface.blit(self._nav_surf,
-                     self._nav_surf.get_rect(centerx=160, y=NAV_Y))
+        # ── on-screen keyboard ─────────────────────────────────────────────────
+        self._kb.draw(surface)
 
     def _draw_result(self, surface: pygame.Surface, vi: int, di: int) -> None:
         res  = self._results[di]
