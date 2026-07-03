@@ -1,0 +1,66 @@
+musi — improvement roadmap / TODO
+==================================
+Workflow: pick one pack per session, implement + verify, push to GitHub,
+then update the Pi via Settings -> Updates.
+
+DONE
+----
+[x] Playback feel pack (42b082d)
+    - Instant play/pause (optimistic state + forced poll next frame)
+    - Smooth progress bar (elapsed extrapolated between MPD polls)
+    - Tap/drag-to-seek on the Now Playing progress bar (scrub knob + preview)
+[x] Battery pack (90c9cd0)
+    - Adaptive FPS: 30 active / 10 idle / 5 screen-off
+    - Screen dim after MUSI_DIM_S (30s) / backlight off after MUSI_OFF_S (90s)
+    - Tap-to-wake (wake tap swallowed); backlight via /sys/class/backlight (GPIO12)
+    - MPD client: 127.0.0.1 + 3s reconnect backoff (dead MPD can't stall UI)
+[x] WiFi + keyboard fix (3067cc5)
+    - WiFi password entry uses the on-screen keyboard (char wheel removed)
+    - Keyboard: SHIFT (one-shot caps) + extra symbols layer
+    - nmcli falls back to sudo -n on polkit denial; sudoers rule via install.sh
+    - Per-screen dim override: Now Playing dims at 15 min, off at 16 min
+[x] Touch polish pack (2d353a9)
+    - widgets.py: KineticList (momentum scrolling) + PendingTap (tap flash)
+    - Unified mouse/finger gestures in app.py; 0.5s long-press support
+    - Long-press menus: track -> Play now / Play next / Add to queue;
+      album -> Play album / next / add; queue row -> Play / Remove
+    - mpd_client: queue_next / queue_add / remove_pos
+
+NEXT PACKS (pick one)
+---------------------
+[ ] OS hardening
+    - Overlay filesystem / read-only root (raspi-config) so hard power cuts
+      can't corrupt the SD card; keep ~/.local/share/musi + music writable
+    - Disable swap (dphys-swapfile), journald Storage=volatile
+    - Wi-Fi power save on by default; off while WiFi Transfer screen is open
+    - Boot time: systemd-analyze blame; boot_delay=0, disable_splash=1
+
+[ ] Features
+    - "Recently played" row on Home (play_history table is already populated,
+      nothing reads it); "Most played" is the same query with GROUP BY
+    - Album grid view in Browse (2-column art grid using existing thumbnails)
+    - A-Z fast-scroll rail on the artists list
+    - Sleep timer (stop after N minutes)
+    - Battery icon in status bar — BLOCKED on hardware: needs a fuel gauge
+      (e.g. MAX17048, I2C) on the musi-link PCB rev B
+
+[ ] Code structure
+    - Extract ListScreen base class (browse/search/queue/wifi/bluetooth all
+      duplicate list+selection+draw logic)
+    - Convert Bluetooth screen to KineticList (only list still snap-scrolling)
+    - Shared icons/widgets module + ArtCache (chevrons, play icons, art loading
+      duplicated across home/browse/now_playing/statusbar)
+    - Replace silent "except Exception: pass" with logging to journald
+
+[ ] Power button software (when Pololu switch arrives)
+    - GPIO17/GPIO4: long-press on/off (Pololu soft latch), short-press screen
+      toggle — reuse backlight.set_on() + the screen-off state in app.py
+
+PI MAINTENANCE NOTES
+--------------------
+- OTA (Settings -> Updates) does git pull + pip install + service restart;
+  it does NOT run install.sh. After packs that change install.sh, run once:
+      cd ~/musi && bash install.sh     (idempotent)
+- Already applied on the Pi: backlight udev rule, sudoers with nmcli.
+- Screen timeouts tunable via MUSI_DIM_S / MUSI_OFF_S env (0 disables).
+- pi/musi.service is stale (installer uses musi-ui.service) — delete someday.
