@@ -37,6 +37,14 @@ DONE
     - WiFi power save on by default; off while WiFi Transfer screen is open
       (hardening.wifi_powersave via sudo iw)
 
+[x] Code structure pack
+    - Extract ListScreen base class (browse/search/queue/wifi/bluetooth all
+      duplicate list+selection+draw logic)
+    - Convert Bluetooth screen to KineticList (only list still snap-scrolling)
+    - Shared icons/widgets module + ArtCache (chevrons, play icons, art loading
+      duplicated across home/browse/now_playing/statusbar)
+    - Replace silent "except Exception: pass" with logging to journald
+
 NEXT PACKS (pick one)
 ---------------------
 [ ] Features
@@ -47,14 +55,6 @@ NEXT PACKS (pick one)
     - Sleep timer (stop after N minutes)
     - Battery icon in status bar — BLOCKED on hardware: needs a fuel gauge
       (e.g. MAX17048, I2C) on the musi-link PCB rev B
-
-[ ] Code structure
-    - Extract ListScreen base class (browse/search/queue/wifi/bluetooth all
-      duplicate list+selection+draw logic)
-    - Convert Bluetooth screen to KineticList (only list still snap-scrolling)
-    - Shared icons/widgets module + ArtCache (chevrons, play icons, art loading
-      duplicated across home/browse/now_playing/statusbar)
-    - Replace silent "except Exception: pass" with logging to journald
 
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
     6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)

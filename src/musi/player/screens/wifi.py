@@ -13,8 +13,8 @@ from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
 from musi.player.keyboard import Keyboard
 from musi.player.mpd_client import PlayerStatus
-from musi.player.screen import Screen
-from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
+from musi.player.list_screen import ListScreen
+from musi.player.widgets import draw_scrollbar
 
 # ── layout ────────────────────────────────────────────────────────────────────
 LIST_Y  = 64
@@ -59,16 +59,14 @@ def _nmcli(args: list, timeout: float) -> subprocess.CompletedProcess:
     return r
 
 
-class WifiScreen(Screen):
+class WifiScreen(ListScreen):
     animates = True   # scan/connect spinners — full FPS, no sleep
 
     def __init__(self, app) -> None:
-        super().__init__(app)
+        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
         self._state:    str            = _S_SCANNING
         self._networks: list[_Network] = []
-        self._sel:      int            = 0
-        self._klist = KineticList(ITEM_H, NAV_Y - LIST_Y)
-        self._tap   = PendingTap()
+
 
         # password entry
         self._target:   _Network | None = None
@@ -137,13 +135,15 @@ class WifiScreen(Screen):
 
     def handle_scroll(self, dy: float) -> None:
         if self._state == _S_LIST:
-            self._klist.scroll_by(dy)
+            super().handle_scroll(dy)
 
     def handle_scroll_start(self) -> None:
-        self._klist.start_touch()
+        if self._state == _S_LIST:
+            super().handle_scroll_start()
 
     def handle_scroll_end(self) -> None:
-        self._klist.end_touch()
+        if self._state == _S_LIST:
+            super().handle_scroll_end()
 
     def _on_key(self, key: "str | None") -> None:
         if key is None:
@@ -290,7 +290,8 @@ class WifiScreen(Screen):
                     try:
                         _nmcli(["connection", "delete", "id", net.ssid], timeout=10)
                     except Exception:
-                        pass
+                        import logging
+                        logging.warning('Ignored exception', exc_info=True)
                 raw = (r.stderr.strip() or r.stdout.strip() or "Connection failed")
                 self._message = ("Wrong password" if "secret" in raw.lower()
                                  else raw[:80])
@@ -346,50 +347,39 @@ class WifiScreen(Screen):
         ref_s = theme.render("Space = refresh", 9, theme.DIM)
         surface.blit(ref_s, ref_s.get_rect(right=312, y=28))
 
-        self._klist.update()
-        self._tap.update()
-        first = self._klist.first_visible()
-        shift = self._klist.pixel_shift()
-        clip  = surface.get_clip()
-        surface.set_clip(pygame.Rect(0, LIST_Y, 320, NAV_Y - LIST_Y))
-        for vi in range(self._klist.visible_rows()):
-            di = first + vi
-            if di >= len(self._networks):
-                break
-            net = self._networks[di]
-            y   = LIST_Y + vi * ITEM_H - shift
-            sel = (di == self._sel)
+        self.draw_list_viewport(surface, len(self._networks))
 
-            rect = pygame.Rect(8, y, 304, ITEM_H - 3)
-            pygame.draw.rect(surface,
-                             theme.ACCENT if sel else theme.CARD_BG,
-                             rect, border_radius=7)
+    def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
+        net = self._networks[di]
+        sel = (di == self._sel)
 
-            col = theme.WHITE
+        rect = pygame.Rect(8, y, 304, ITEM_H - 3)
+        pygame.draw.rect(surface,
+                         theme.ACCENT if sel else theme.CARD_BG,
+                         rect, border_radius=7)
 
-            # signal bars
-            _signal_bars(surface, 22, y + (ITEM_H - 3) // 2, net.signal,
-                         theme.WHITE if sel else theme.DIM)
+        col = theme.WHITE
 
-            # SSID
-            max_w = 210 if net.secured else 230
-            ssid_s = theme.render(net.ssid, 12, col, bold=(sel or net.connected),
-                                  max_width=max_w)
-            surface.blit(ssid_s, (42, y + (ITEM_H - 3 - ssid_s.get_height()) // 2))
+        # signal bars
+        _signal_bars(surface, 22, y + (ITEM_H - 3) // 2, net.signal,
+                     theme.WHITE if sel else theme.DIM)
 
-            # lock icon for secured networks
-            if net.secured:
-                _lock(surface, 270, y + (ITEM_H - 3) // 2,
-                      theme.WHITE if sel else theme.DIM)
+        # SSID
+        max_w = 210 if net.secured else 230
+        ssid_s = theme.render(net.ssid, 12, col, bold=(sel or net.connected),
+                              max_width=max_w)
+        surface.blit(ssid_s, (42, y + (ITEM_H - 3 - ssid_s.get_height()) // 2))
 
-            # connected checkmark
-            if net.connected:
-                ck_s = theme.render("✓", 11, (80, 200, 120))
-                surface.blit(ck_s, ck_s.get_rect(right=306,
-                             centery=y + (ITEM_H - 3) // 2))
+        # lock icon for secured networks
+        if net.secured:
+            _lock(surface, 270, y + (ITEM_H - 3) // 2,
+                  theme.WHITE if sel else theme.DIM)
 
-        surface.set_clip(clip)
-        draw_scrollbar(surface, 314, LIST_Y, NAV_Y - LIST_Y, self._klist)
+        # connected checkmark
+        if net.connected:
+            ck_s = theme.render("✓", 11, (80, 200, 120))
+            surface.blit(ck_s, ck_s.get_rect(right=306,
+                         centery=y + (ITEM_H - 3) // 2))
 
     def _draw_password(self, surface: pygame.Surface) -> None:
         # target SSID
@@ -456,8 +446,7 @@ class WifiScreen(Screen):
 
     # ── scroll ────────────────────────────────────────────────────────────────
 
-    def _clamp_scroll(self) -> None:
-        self._klist.ensure_visible(self._sel)
+
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────────

@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.keyboard import Keyboard
 from musi.player.mpd_client import PlayerStatus
-from musi.player.screen import Screen
-from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
+from musi.player.list_screen import ListScreen
+from musi.player.widgets import draw_scrollbar
 
 # ── layout constants ──────────────────────────────────────────────────────────
 BAR_H   = 26          # status bar height (matches statusbar.BAR_H)
@@ -34,18 +34,15 @@ class _Result:
     path:   str
 
 
-class SearchScreen(Screen):
+class SearchScreen(ListScreen):
     animates = True   # cursor blink + keyboard — keep responsive, no sleep
 
     def __init__(self, app) -> None:
-        super().__init__(app)
+        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=KB_TOP)
         self._query:   str           = ""
         self._results: list[_Result] = []
-        self._sel:     int           = 0
         self._enter_t: float         = 0.0
         self._kb    = Keyboard(KB_TOP)
-        self._klist = KineticList(ITEM_H, KB_TOP - LIST_Y)
-        self._tap   = PendingTap()
 
         # static surfaces (lazy)
         self._nav_surf: pygame.Surface | None = None
@@ -130,14 +127,7 @@ class SearchScreen(Screen):
         self._enter_t = time.monotonic()
         self._search()
 
-    def handle_scroll(self, dy: float) -> None:
-        self._klist.scroll_by(dy)
 
-    def handle_scroll_start(self) -> None:
-        self._klist.start_touch()
-
-    def handle_scroll_end(self) -> None:
-        self._klist.end_touch()
 
     # ── button input ─────────────────────────────────────────────────────────
 
@@ -202,20 +192,7 @@ class SearchScreen(Screen):
                                 11, theme.DIM, max_width=290)
             surface.blit(hint, hint.get_rect(centerx=160, y=240))
         else:
-            self._klist.update()
-            self._tap.update()
-            first = self._klist.first_visible()
-            shift = self._klist.pixel_shift()
-            clip  = surface.get_clip()
-            surface.set_clip(pygame.Rect(0, LIST_Y, 320, KB_TOP - LIST_Y))
-            for vi in range(self._klist.visible_rows()):
-                di = first + vi
-                if di >= len(self._results):
-                    break
-                self._draw_result(surface, LIST_Y + vi * ITEM_H - shift, di)
-            surface.set_clip(clip)
-
-            draw_scrollbar(surface, 314, LIST_Y, KB_TOP - LIST_Y, self._klist)
+            self.draw_list_viewport(surface, len(self._results))
 
         # ── result count (top-right of box) ───────────────────────────────────
         if self._results:
@@ -227,7 +204,7 @@ class SearchScreen(Screen):
         # ── on-screen keyboard ─────────────────────────────────────────────────
         self._kb.draw(surface)
 
-    def _draw_result(self, surface: pygame.Surface, y: int, di: int) -> None:
+    def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         res  = self._results[di]
         sel  = (di == self._sel)
         rect = pygame.Rect(8, y, 304, ITEM_H - 3)
@@ -259,7 +236,7 @@ class SearchScreen(Screen):
 
         # small play triangle on the right when selected
         if sel:
-            _play_icon(surface, 302, y + (ITEM_H - 3) // 2, theme.WHITE)
+            icons.draw_play(surface, 302, y + (ITEM_H - 3) // 2, theme.WHITE)
 
     # ── search logic ─────────────────────────────────────────────────────────
 
@@ -314,10 +291,7 @@ class SearchScreen(Screen):
         from musi.player.screens.now_playing import NowPlayingScreen
         self.app.push(NowPlayingScreen(self.app))
 
-    # ── scroll ────────────────────────────────────────────────────────────────
 
-    def _clamp_scroll(self) -> None:
-        self._klist.ensure_visible(self._sel)
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────────
@@ -327,6 +301,4 @@ def _magnifier(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
     pygame.draw.line(surface, col, (cx + 3, cy + 3), (cx + 7, cy + 7), 2)
 
 
-def _play_icon(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    pts = [(cx - 5, cy - 6), (cx - 5, cy + 6), (cx + 6, cy)]
-    pygame.draw.polygon(surface, col, pts)
+

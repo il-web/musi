@@ -6,11 +6,10 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import art_cache, audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
-from musi.player.screen import Screen
-from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
+from musi.player.list_screen import ListScreen
 
 ITEM_H  = 52          # height of each list row
 LIST_Y  = 62          # top of the list (below statusbar + breadcrumb)
@@ -27,22 +26,17 @@ class _Item:
     art_path: str = ""
 
 
-class BrowseScreen(Screen):
+class BrowseScreen(ListScreen):
 
     def __init__(self, app) -> None:
-        super().__init__(app)
+        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
         self._level:       int         = 0
         self._artist_id:   int         = 0
         self._artist_name: str         = ""
         self._album_id:    int         = 0
         self._album_name:  str         = ""
         self._items:       list[_Item] = []
-        self._sel:         int         = 0
-        self._klist = KineticList(ITEM_H, NAV_Y - LIST_Y)
-        self._tap   = PendingTap()
 
-        # tiny album-art cache: art_path → 36×36 Surface (or None)
-        self._art_cache: dict[str, pygame.Surface | None] = {}
 
         # static surfaces
         self._nav_surf: pygame.Surface | None = None
@@ -81,21 +75,7 @@ class BrowseScreen(Screen):
             surface.blit(back_s, (320 - back_s.get_width() - 8, 30))
 
         # ── list (pixel-smooth with momentum) ─────────────────────────────────
-        self._klist.update()
-        self._tap.update()
-        first = self._klist.first_visible()
-        shift = self._klist.pixel_shift()
-        clip  = surface.get_clip()
-        surface.set_clip(pygame.Rect(0, LIST_Y, 320, NAV_Y - LIST_Y))
-        for vi in range(self._klist.visible_rows()):
-            di = first + vi
-            if di >= len(self._items):
-                break
-            self._draw_item(surface, LIST_Y + vi * ITEM_H - shift, di)
-        surface.set_clip(clip)
-
-        # ── scrollbar ─────────────────────────────────────────────────────────
-        draw_scrollbar(surface, 315, LIST_Y, NAV_Y - LIST_Y, self._klist)
+        self.draw_list_viewport(surface, len(self._items))
 
         # ── empty state ───────────────────────────────────────────────────────
         if not self._items:
@@ -105,7 +85,7 @@ class BrowseScreen(Screen):
         # ── nav ───────────────────────────────────────────────────────────────
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
 
-    def _draw_item(self, surface: pygame.Surface, y: int, di: int) -> None:
+    def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         item = self._items[di]
         sel  = (di == self._sel)
         rect = pygame.Rect(10, y, 298, ITEM_H - 3)
@@ -117,7 +97,7 @@ class BrowseScreen(Screen):
 
         if self._level == 1:
             # Albums — show art thumbnail on left
-            art = self._get_art(item.art_path)
+            art = art_cache.load_art_thumbnail(item.art_path)
             if art:
                 surface.blit(art, (16, y + 3))
                 tx = 68
@@ -150,7 +130,7 @@ class BrowseScreen(Screen):
             surface.blit(lbl_s, (50, y + (ITEM_H - 3 - lbl_s.get_height()) // 2))
 
             # play icon on right
-            _play_icon(surface, 302, bcy, theme.WHITE if sel else theme.DIM)
+            icons.draw_play(surface, 302, bcy, theme.WHITE if sel else theme.DIM)
             return   # no chevron for tracks
 
         else:
@@ -160,8 +140,8 @@ class BrowseScreen(Screen):
                          (16, y + (ITEM_H - 3 - lbl_s.get_height()) // 2))
 
         # chevron (artists + albums)
-        _chevron(surface, 302, y + (ITEM_H - 3) // 2,
-                 theme.WHITE if sel else theme.DIM)
+        icons.draw_chevron_right(surface, 302, y + (ITEM_H - 3) // 2,
+                                 theme.WHITE if sel else theme.DIM)
 
     # ── input ─────────────────────────────────────────────────────────────────
 
@@ -191,14 +171,7 @@ class BrowseScreen(Screen):
             self._open_album_menu(item)
         return True
 
-    def handle_scroll(self, dy: float) -> None:
-        self._klist.scroll_by(dy)
 
-    def handle_scroll_start(self) -> None:
-        self._klist.start_touch()
-
-    def handle_scroll_end(self) -> None:
-        self._klist.end_touch()
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.UP:
@@ -345,32 +318,11 @@ class BrowseScreen(Screen):
         ]
         self._klist.set_count(len(self._items), reset=True)
 
-    def _get_art(self, art_path: str) -> pygame.Surface | None:
-        if art_path in self._art_cache:
-            return self._art_cache[art_path]
-        result = None
-        if art_path and Path(art_path).exists():
-            try:
-                img    = pygame.image.load(art_path).convert()
-                result = pygame.transform.scale(img, (46, 46))
-            except Exception:
-                pass
-        self._art_cache[art_path] = result
-        return result
 
 
 
-    def _clamp_scroll(self) -> None:
-        self._klist.ensure_visible(self._sel)
 
 
-# ── drawing helpers ───────────────────────────────────────────────────────────
-
-def _chevron(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    pts = [(cx - 4, cy - 6), (cx + 2, cy), (cx - 4, cy + 6)]
-    pygame.draw.lines(surface, col, False, pts, 2)
 
 
-def _play_icon(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    pts = [(cx - 5, cy - 6), (cx - 5, cy + 6), (cx + 6, cy)]
-    pygame.draw.polygon(surface, col, pts)
+

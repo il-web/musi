@@ -70,7 +70,8 @@ def _windows() -> str:
         if name.strip():
             return "wired"
     except Exception:
-        pass
+        import logging
+        logging.warning('Ignored exception', exc_info=True)
     return "unknown"
 
 
@@ -85,7 +86,8 @@ def _linux() -> str:
         if "Audio Sink" in r.stdout or "Connected: yes" in r.stdout:
             return "bluetooth"
     except Exception:
-        pass
+        import logging
+        logging.warning('Ignored exception', exc_info=True)
 
     # 2 — PulseAudio / PipeWire: check sinks
     try:
@@ -98,7 +100,8 @@ def _linux() -> str:
         if r.returncode == 0 and r.stdout.strip():
             return "wired"
     except Exception:
-        pass
+        import logging
+        logging.warning('Ignored exception', exc_info=True)
 
     # 3 — ALSA only (bare Pi with no PulseAudio)
     try:
@@ -109,6 +112,7 @@ def _linux() -> str:
         if r.returncode == 0 and r.stdout.strip():
             return "wired"
     except Exception:
-        pass
+        import logging
+        logging.warning('Ignored exception', exc_info=True)
 
     return "unknown"

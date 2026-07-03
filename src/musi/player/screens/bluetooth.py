@@ -17,10 +17,10 @@ from dataclasses import dataclass
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
-from musi.player.screen import Screen
+from musi.player.list_screen import ListScreen
 
 SCAN_RECT = pygame.Rect(10, 50, 300, 30)   # "Scan for devices" button
 LIST_Y = 88      # first device card top
@@ -36,12 +36,11 @@ class _Device:
     connected: bool = False
 
 
-class BluetoothScreen(Screen):
+class BluetoothScreen(ListScreen):
 
     def __init__(self, app) -> None:
-        super().__init__(app)
+        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
         self._devices:    list[_Device] = []
-        self._sel:        int  = 0
         self._info_msg:   str  = ""     # loading / error / empty text
         self._action_msg: str  = ""     # "Connecting…", "Connected", etc.
         self._busy:       bool = False  # block input while an action runs
@@ -83,40 +82,7 @@ class BluetoothScreen(Screen):
             msg = theme.render(self._info_msg, 12, theme.DIM, max_width=290)
             surface.blit(msg, (14, LIST_Y))
         else:
-            for i, dev in enumerate(self._devices):
-                y = LIST_Y + i * ITEM_H
-                if y + ITEM_H > NAV_Y - 20:
-                    break   # no room for more items
-
-                rect = pygame.Rect(10, y, 300, ITEM_H - 4)
-                sel  = (i == self._sel)
-                bg   = theme.ACCENT if sel else theme.CARD_BG
-
-                pygame.draw.rect(surface, bg, rect, border_radius=8)
-
-                # BT glyph
-                gcol = theme.WHITE if sel else theme.DIM
-                _bt_glyph(surface, 36, y + (ITEM_H - 4) // 2, gcol)
-
-                # device name
-                name_s = theme.render(dev.name, 13, theme.WHITE, bold=sel, max_width=220)
-                surface.blit(name_s, (58, y + 10))
-
-                # status badge
-                if dev.connected:
-                    badge_col = (120, 230, 140) if not sel else theme.WHITE
-                    badge_s   = theme.render("● Connected", 10, badge_col)
-                elif dev.paired:
-                    badge_col = theme.DIM if not sel else (220, 220, 230)
-                    badge_s   = theme.render("○ Tap to connect", 10, badge_col)
-                else:
-                    badge_col = theme.ACCENT if not sel else (220, 220, 230)
-                    badge_s   = theme.render("＋ Tap to pair", 10, badge_col)
-                surface.blit(badge_s, (58, y + 32))
-
-                # chevron
-                ccol = theme.WHITE if sel else theme.CARD_BG
-                _chevron(surface, 302, y + (ITEM_H - 4) // 2, ccol)
+            self.draw_list_viewport(surface, len(self._devices))
 
         # action message (bottom, above nav)
         if self._action_msg:
@@ -124,6 +90,38 @@ class BluetoothScreen(Screen):
             surface.blit(am, am.get_rect(centerx=160, y=NAV_Y - 22))
 
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
+
+    def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
+        dev = self._devices[di]
+        sel  = (di == self._sel)
+        bg   = theme.ACCENT if sel else theme.CARD_BG
+        rect = pygame.Rect(10, y, 300, ITEM_H - 4)
+
+        pygame.draw.rect(surface, bg, rect, border_radius=8)
+
+        # BT glyph
+        gcol = theme.WHITE if sel else theme.DIM
+        icons.draw_bt_glyph(surface, 36, y + (ITEM_H - 4) // 2, gcol)
+
+        # device name
+        name_s = theme.render(dev.name, 13, theme.WHITE, bold=sel, max_width=220)
+        surface.blit(name_s, (58, y + 10))
+
+        # status badge
+        if dev.connected:
+            badge_col = (120, 230, 140) if not sel else theme.WHITE
+            badge_s   = theme.render("● Connected", 10, badge_col)
+        elif dev.paired:
+            badge_col = theme.DIM if not sel else (220, 220, 230)
+            badge_s   = theme.render("○ Tap to connect", 10, badge_col)
+        else:
+            badge_col = theme.ACCENT if not sel else (220, 220, 230)
+            badge_s   = theme.render("＋ Tap to pair", 10, badge_col)
+        surface.blit(badge_s, (58, y + 32))
+
+        # chevron
+        ccol = theme.WHITE if sel else theme.CARD_BG
+        icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, ccol)
 
     # ── input ─────────────────────────────────────────────────────────────────
 
@@ -146,16 +144,14 @@ class BluetoothScreen(Screen):
             self._scan()
             return None
         if not self._info_msg:
-            for i, dev in enumerate(self._devices):
-                ry = LIST_Y + i * ITEM_H
-                if ry + ITEM_H > NAV_Y - 20:
-                    break
-                if ry <= y < ry + ITEM_H - 4:
-                    self._sel = i
+            if LIST_Y <= y < NAV_Y - 20 and not self._tap.pending:
+                di = self._klist.index_at(y - LIST_Y)
+                if 0 <= di < len(self._devices):
+                    self._sel = di
                     if not self._busy and not self._scanning:
-                        self._activate(dev)
+                        self._tap.set(lambda: self._activate(self._devices[self._sel]))
                     return None
-        return None
+        return super().handle_touch(x, y)
 
     # ── internal ──────────────────────────────────────────────────────────────
 
@@ -183,7 +179,8 @@ class BluetoothScreen(Screen):
                 capture_output=True, text=True, timeout=15,
             )
         except Exception:
-            pass
+            import logging
+            logging.warning('Ignored exception', exc_info=True)
         self._scanning = False
         self._fetch()
 
@@ -312,16 +309,4 @@ class BluetoothScreen(Screen):
         threading.Thread(target=_run, daemon=True).start()
 
 
-# ── drawing helpers ───────────────────────────────────────────────────────────
 
-def _bt_glyph(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    pygame.draw.line(surface, col, (cx,     cy - 7), (cx,     cy + 7), 2)
-    pygame.draw.line(surface, col, (cx,     cy - 7), (cx + 5, cy - 3), 2)
-    pygame.draw.line(surface, col, (cx + 5, cy - 3), (cx,     cy    ), 2)
-    pygame.draw.line(surface, col, (cx,     cy    ), (cx + 5, cy + 3), 2)
-    pygame.draw.line(surface, col, (cx + 5, cy + 3), (cx,     cy + 7), 2)
-
-
-def _chevron(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    pts = [(cx - 4, cy - 6), (cx + 2, cy), (cx - 4, cy + 6)]
-    pygame.draw.lines(surface, col, False, pts, 2)

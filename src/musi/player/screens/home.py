@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import art_cache, audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -85,7 +85,7 @@ class HomeScreen(Screen):
             # placeholder square
             pygame.draw.rect(surface, (40, 40, 55),
                              pygame.Rect(18, CARD_Y + 10, 76, 76), border_radius=4)
-            _draw_music_note(surface, 56, CARD_Y + 48, (80, 80, 100))
+            icons.draw_music_note(surface, 56, CARD_Y + 48, (80, 80, 100))
 
         # track info (right of art)
         tx = 104
@@ -97,9 +97,9 @@ class HomeScreen(Screen):
         # tiny play state icon
         state_col = self._accent if status.state == "play" else (100, 100, 115)
         if status.state == "play":
-            _mini_pause(surface, 302, CARD_Y + 16, state_col)
+            icons.draw_pause(surface, 302, CARD_Y + 16, state_col, size="sm")
         else:
-            _mini_play(surface, 302, CARD_Y + 16, state_col)
+            icons.draw_play(surface, 302, CARD_Y + 16, state_col, size="sm")
 
         # progress bar at bottom of card
         if status.duration > 0:
@@ -119,14 +119,14 @@ class HomeScreen(Screen):
                 _draw_item_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.WHITE)
                 surface.blit(label_surf, (60, y + (ITEM_H - label_surf.get_height()) // 2 - 2))
                 # chevron
-                _draw_chevron(surface, 296, y + (ITEM_H - 4) // 2, theme.WHITE)
+                icons.draw_chevron_right(surface, 296, y + (ITEM_H - 4) // 2, theme.WHITE)
             else:
                 # unselected: card bg
                 pygame.draw.rect(surface, theme.CARD_BG, item_rect, border_radius=8)
                 _draw_item_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.DIM)
                 dim_surf = theme.render(MENU[i], 15, theme.DIM)
                 surface.blit(dim_surf, (60, y + (ITEM_H - dim_surf.get_height()) // 2 - 2))
-                _draw_chevron(surface, 296, y + (ITEM_H - 4) // 2, theme.CARD_BG)
+                icons.draw_chevron_right(surface, 296, y + (ITEM_H - 4) // 2, theme.CARD_BG)
 
         # ── nav hint ──────────────────────────────────────────────────────────
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
@@ -185,42 +185,9 @@ class HomeScreen(Screen):
         if not status.path:
             return
 
-        row = self.app.db.execute(
-            """SELECT al.art_path, al.palette
-               FROM tracks t JOIN albums al ON al.id = t.album_id
-               WHERE t.path = ?""",
-            (status.path,),
-        ).fetchone()
-
-        if not row and status.artist and status.album:
-            row = self.app.db.execute(
-                """SELECT al.art_path, al.palette
-                   FROM albums al JOIN artists ar ON ar.id = al.artist_id
-                   WHERE ar.name = ? AND al.title = ?""",
-                (status.artist, status.album),
-            ).fetchone()
-
-        if not row:
-            return
-
-        if row["art_path"] and Path(row["art_path"]).exists():
-            try:
-                img = pygame.image.load(row["art_path"]).convert()
-                self._art = pygame.transform.scale(img, (76, 76))
-            except Exception:
-                pass
-
-        if row["palette"]:
-            try:
-                colours = json.loads(row["palette"])
-                if colours:
-                    self._accent = theme.hex_to_rgb(colours[0])
-                    # ensure accent is bright enough to be visible on dark BG
-                    r, g, b = self._accent
-                    if r + g + b < 180:
-                        self._accent = theme.brighten(self._accent, 1.8)
-            except Exception:
-                pass
+        res = art_cache.get_track_art_and_palette(self.app.db, status.path, status.artist, status.album)
+        self._art = art_cache.load_surface(res["art_path"], (76, 76))
+        self._accent = art_cache.parse_palette(res["palette"], do_brighten=True)
 
     def _update_text(self, status: PlayerStatus) -> None:
         title = status.title or ("musi" if not status.connected else "Nothing playing")
@@ -263,25 +230,3 @@ def _draw_item_icon(surface, index, cx, cy, colour):
     elif index == 4: # Settings — gear
         pygame.draw.circle(surface, colour, (cx, cy), 7, 2)
         pygame.draw.circle(surface, colour, (cx, cy), 3)
-
-
-def _draw_chevron(surface, cx, cy, colour):
-    pts = [(cx - 4, cy - 6), (cx + 2, cy), (cx - 4, cy + 6)]
-    pygame.draw.lines(surface, colour, False, pts, 2)
-
-
-def _draw_music_note(surface, cx, cy, colour):
-    pygame.draw.circle(surface, colour, (cx - 5, cy + 4), 5)
-    pygame.draw.line(surface, colour, (cx, cy + 4), (cx, cy - 10), 2)
-    pygame.draw.line(surface, colour, (cx, cy - 10), (cx + 8, cy - 14), 2)
-    pygame.draw.line(surface, colour, (cx + 8, cy - 14), (cx + 8, cy - 4), 2)
-
-
-def _mini_play(surface, cx, cy, colour):
-    pts = [(cx - 4, cy - 7), (cx - 4, cy + 7), (cx + 7, cy)]
-    pygame.draw.polygon(surface, colour, pts)
-
-
-def _mini_pause(surface, cx, cy, colour):
-    pygame.draw.rect(surface, colour, (cx - 6, cy - 7, 4, 14), border_radius=1)
-    pygame.draw.rect(surface, colour, (cx + 2, cy - 7, 4, 14), border_radius=1)

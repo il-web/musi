@@ -80,4 +80,5 @@ def wifi_powersave(on: bool) -> None:
             capture_output=True, timeout=10,
         )
     except Exception:
-        pass
+        import logging
+        logging.warning('Ignored exception', exc_info=True)

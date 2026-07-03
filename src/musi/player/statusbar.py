@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pygame
 
-from musi.player import theme
+from musi.player import icons, theme
 
 BAR_H: int = 26   # height in virtual (320×480) pixels
 
@@ -38,7 +38,7 @@ def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = Fal
     # ── back chevron (left) — only when there's a screen to go back to ─────────
     logo_x = 10
     if show_back:
-        _draw_back_chevron(surface, 12, cy, theme.WHITE)
+        icons.draw_chevron_left(surface, 12, cy, theme.WHITE)
         logo_x = 28
 
     # ── "musi" logo (left) ────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = Fal
 
     # ── audio icon ────────────────────────────────────────────────────────────
     if audio_type == "bluetooth":
-        _draw_bt(surface, 278, cy, theme.ACCENT)
+        icons.draw_bt_glyph(surface, 278, cy, theme.ACCENT)
     else:
         # wired or unknown → headphone glyph
         _draw_headphones(surface, 278, cy, theme.DIM)
@@ -69,21 +69,7 @@ def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = Fal
 
 # ── icon helpers ──────────────────────────────────────────────────────────────
 
-def _draw_back_chevron(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    """Left-pointing '‹' chevron (~6×10 px) indicating tap-to-go-back."""
-    pygame.draw.lines(
-        surface, col, False,
-        [(cx + 3, cy - 5), (cx - 2, cy), (cx + 3, cy + 5)], 2,
-    )
 
-
-def _draw_bt(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
-    """Bluetooth ᛒ glyph (~10×14 px)."""
-    pygame.draw.line(surface, col, (cx,     cy - 7), (cx,     cy + 7), 2)
-    pygame.draw.line(surface, col, (cx,     cy - 7), (cx + 5, cy - 3), 2)
-    pygame.draw.line(surface, col, (cx + 5, cy - 3), (cx,     cy    ), 2)
-    pygame.draw.line(surface, col, (cx,     cy    ), (cx + 5, cy + 3), 2)
-    pygame.draw.line(surface, col, (cx + 5, cy + 3), (cx,     cy + 7), 2)
 
 
 def _draw_headphones(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:

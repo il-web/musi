@@ -76,7 +76,8 @@ def _get_source_image(audio_path: Path) -> Optional[Image.Image]:
         try:
             return Image.open(io.BytesIO(data)).convert("RGB")
         except Exception:
-            pass
+            import logging
+            logging.warning('Ignored exception', exc_info=True)
 
     for name in SIDECAR_NAMES:
         candidate = audio_path.parent / name

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -59,13 +59,13 @@ class SettingsScreen(Screen):
                 pygame.draw.rect(surface, theme.ACCENT, rect, border_radius=8)
                 _draw_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.WHITE)
                 surface.blit(label_surf, (60, y + (ITEM_H - label_surf.get_height()) // 2 - 2))
-                _chevron(surface, 302, y + (ITEM_H - 4) // 2, theme.WHITE)
+                icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, theme.WHITE)
             else:
                 pygame.draw.rect(surface, theme.CARD_BG, rect, border_radius=8)
                 _draw_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.DIM)
                 dim = theme.render(MENU[i], 16, theme.DIM)
                 surface.blit(dim, (60, y + (ITEM_H - dim.get_height()) // 2 - 2))
-                _chevron(surface, 302, y + (ITEM_H - 4) // 2, theme.CARD_BG)
+                icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, theme.CARD_BG)
 
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
 
@@ -135,6 +135,4 @@ def _draw_icon(surface, index, cx, cy, col):
         pygame.draw.line(surface, col, (cx, cy - 9), (cx, cy - 1), 2)
 
 
-def _chevron(surface, cx, cy, col):
-    pts = [(cx - 4, cy - 6), (cx + 2, cy), (cx - 4, cy + 6)]
-    pygame.draw.lines(surface, col, False, pts, 2)
+

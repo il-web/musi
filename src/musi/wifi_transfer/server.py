@@ -206,4 +206,5 @@ def _rescan(music_root: Path, art_dir: Path, db_path: Path) -> None:
         scan(music_root=music_root, art_dir=art_dir, conn=conn)
         conn.close()
     except Exception:
-        pass
+        import logging
+        logging.warning('Ignored exception', exc_info=True)

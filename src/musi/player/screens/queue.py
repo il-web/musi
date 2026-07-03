@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus, QueueItem
-from musi.player.screen import Screen
-from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
+from musi.player.list_screen import ListScreen
+from musi.player.widgets import draw_scrollbar
 
 LIST_Y      = 58
 ITEM_H      = 50
@@ -22,13 +22,11 @@ HANDLE_X    = 286            # drag-handle centre
 HANDLE_ZONE = 256            # x >= this → handle (drag); x < this → row body (tap)
 
 
-class QueueScreen(Screen):
+class QueueScreen(ListScreen):
 
     def __init__(self, app) -> None:
-        super().__init__(app)
+        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
         self._items: list[QueueItem] = []
-        self._klist = KineticList(ITEM_H, NAV_Y - LIST_Y)
-        self._tap   = PendingTap()
         # drag-reorder state
         self._drag_idx:  int | None = None   # current index of dragged row
         self._drag_orig: int = 0             # its original MPD position
@@ -61,31 +59,19 @@ class QueueScreen(Screen):
             msg = theme.render("Queue is empty", 13, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=220))
         else:
-            self._klist.update()
-            self._tap.update()
-            first = self._klist.first_visible()
-            shift = self._klist.pixel_shift()
-            clip  = surface.get_clip()
-            surface.set_clip(pygame.Rect(0, LIST_Y, 320, NAV_Y - LIST_Y))
-            for vi in range(self._klist.visible_rows()):
-                di = first + vi
-                if di >= len(self._items):
-                    break
-                if di == self._drag_idx:
-                    continue   # the dragged row is drawn floating, below
-                self._draw_row(surface, LIST_Y + vi * ITEM_H - shift, di,
-                               status, lifted=False)
-
+            self.draw_list_viewport(surface, len(self._items))
+            # The dragged row must be drawn floating on top
             if self._drag_idx is not None:
                 y = max(LIST_Y, min(NAV_Y - ITEM_H, self._drag_y - ITEM_H // 2))
-                self._draw_row(surface, y, self._drag_idx, status, lifted=True)
-            surface.set_clip(clip)
-
-            draw_scrollbar(surface, 315, LIST_Y, NAV_Y - LIST_Y, self._klist)
+                self._draw_row(surface, y, self._drag_idx, status=status, lifted=True)
 
         surface.blit(self._hint, self._hint.get_rect(centerx=160, y=NAV_Y + 2))
 
-    def _draw_row(self, surface, y, di, status, lifted):
+    def _draw_row(self, surface: pygame.Surface, y: int, di: int, status: PlayerStatus = None, lifted: bool = False) -> None:
+        if di == self._drag_idx and not lifted:
+            return  # The dragged row is drawn floating on top at the end
+        if status is None:
+            status = self.app.status
         item   = self._items[di]
         is_cur = (item.pos == status.queue_pos)
 
@@ -99,8 +85,8 @@ class QueueScreen(Screen):
         pygame.draw.rect(surface, bg, rect, border_radius=7)
 
         if is_cur:
-            _play_tri(surface, 22, y + ITEM_H // 2,
-                      theme.WHITE if lifted else (120, 230, 140))
+            icons.draw_play(surface, 22, y + ITEM_H // 2,
+                            theme.WHITE if lifted else (120, 230, 140), size="xs")
         tx = 38
         bold  = lifted or is_cur
         title = theme.render(item.title, 13, theme.WHITE, bold=bold, max_width=212)
@@ -148,14 +134,7 @@ class QueueScreen(Screen):
         self.app.request_poll()
         self._refresh()
 
-    def handle_scroll(self, dy: float) -> None:
-        self._klist.scroll_by(dy)
 
-    def handle_scroll_start(self) -> None:
-        self._klist.start_touch()
-
-    def handle_scroll_end(self) -> None:
-        self._klist.end_touch()
 
     # drag the handle to reorder
     def on_press(self, x: int, y: int) -> bool:
@@ -189,10 +168,7 @@ class QueueScreen(Screen):
         self._refresh()
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
 
-def _play_tri(surface, cx, cy, col):
-    pygame.draw.polygon(surface, col, [(cx - 4, cy - 5), (cx - 4, cy + 5), (cx + 5, cy)])
 
 
 def _handle(surface, cx, cy, col):

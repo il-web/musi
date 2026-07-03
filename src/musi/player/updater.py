@@ -129,7 +129,8 @@ def apply(progress: "Callable[[float, str], None] | None" = None) -> tuple[bool,
                 capture_output=True, text=True, timeout=300,
             )
         except Exception:
-            pass
+            import logging
+            logging.warning('Ignored exception', exc_info=True)
     step(0.90, "Installed")
 
     # Restart the service — this terminates the current process and relaunches

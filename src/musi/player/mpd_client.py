@@ -108,7 +108,8 @@ class MusiMPDClient:
             self._client.close()
             self._client.disconnect()
         except Exception:
-            pass
+            import logging
+            logging.warning('Ignored exception', exc_info=True)
         self._connected = False
 
     def _ensure(self) -> bool:
@@ -215,7 +216,8 @@ class MusiMPDClient:
         try:
             self._client.update()
         except Exception:
-            pass
+            import logging
+            logging.warning('Ignored exception', exc_info=True)
 
     # ── queue management ──────────────────────────────────────────────────────
 
@@ -300,7 +302,8 @@ class MusiMPDClient:
                 )
                 db_conn.commit()
         except Exception:
-            pass
+            import logging
+            logging.warning('Ignored exception', exc_info=True)
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

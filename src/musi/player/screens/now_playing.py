@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import art_cache, audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -123,8 +123,11 @@ class NowPlayingScreen(Screen):
             surface.blit(self._time_surf, (16, TIME_Y))
 
         # 8 — transport controls
-        _draw_prev(surface,  76, CTRL_Y, theme.WHITE)
-        _draw_play_pause(surface, 160, CTRL_Y, status.state == "play", self._accent)
+        _draw_prev(surface, 76, CTRL_Y, theme.WHITE)
+        if status.state == "play":
+            icons.draw_pause(surface, 160, CTRL_Y, self._accent, size="lg")
+        else:
+            icons.draw_play(surface, 160, CTRL_Y, self._accent, size="lg")
         _draw_next(surface, 244, CTRL_Y, theme.WHITE)
 
         # 9 — shuffle / repeat toggles + queue button
@@ -231,49 +234,10 @@ class NowPlayingScreen(Screen):
         if not status.path:
             return
 
-        # Try exact path match first
-        row = self.app.db.execute(
-            """SELECT al.art_path, al.backdrop_path, al.palette
-               FROM tracks t JOIN albums al ON al.id = t.album_id
-               WHERE t.path = ?""",
-            (status.path,),
-        ).fetchone()
-
-        # Fallback: match by artist + album name from MPD tags
-        # (handles OGG/MP3 test files whose FLAC originals are in the DB)
-        if not row and status.artist and status.album:
-            row = self.app.db.execute(
-                """SELECT al.art_path, al.backdrop_path, al.palette
-                   FROM albums al
-                   JOIN artists ar ON ar.id = al.artist_id
-                   WHERE ar.name = ? AND al.title = ?""",
-                (status.artist, status.album),
-            ).fetchone()
-
-        if not row:
-            return
-
-        if row["backdrop_path"] and Path(row["backdrop_path"]).exists():
-            try:
-                _bd = pygame.image.load(row["backdrop_path"]).convert()
-                self._backdrop = pygame.transform.scale(_bd, (320, 480))
-            except Exception:
-                pass
-
-        if row["art_path"] and Path(row["art_path"]).exists():
-            try:
-                img = pygame.image.load(row["art_path"]).convert()
-                self._art = pygame.transform.scale(img, (ART_W, ART_H))
-            except Exception:
-                pass
-
-        if row["palette"]:
-            try:
-                colours = json.loads(row["palette"])
-                if colours:
-                    self._accent = theme.hex_to_rgb(colours[0])
-            except Exception:
-                pass
+        res = art_cache.get_track_art_and_palette(self.app.db, status.path, status.artist, status.album)
+        self._backdrop = art_cache.load_surface(res["backdrop_path"], (320, 480))
+        self._art = art_cache.load_surface(res["art_path"], (ART_W, ART_H))
+        self._accent = art_cache.parse_palette(res["palette"])
 
     def _update_text_cache(self, status: PlayerStatus) -> None:
         """Re-render text surfaces only when content changes."""
@@ -312,12 +276,7 @@ def _draw_bar(surface, x, y, w, h, progress, colour):
         pygame.draw.rect(surface, colour, (x, y, max(h, int(w * progress)), h), border_radius=h)
 
 
-def _draw_play_pause(surface, cx, cy, playing, colour):
-    if playing:
-        pygame.draw.rect(surface, colour, (cx - 9, cy - 11, 6, 22), border_radius=2)
-        pygame.draw.rect(surface, colour, (cx + 3, cy - 11, 6, 22), border_radius=2)
-    else:
-        pygame.draw.polygon(surface, colour, [(cx - 9, cy - 13), (cx - 9, cy + 13), (cx + 13, cy)])
+
 
 
 def _draw_prev(surface, cx, cy, colour):

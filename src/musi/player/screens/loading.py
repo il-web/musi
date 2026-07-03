@@ -134,7 +134,8 @@ class LoadingScreen(Screen):
             try:
                 self.app.mpd.connect()
             except Exception:
-                pass
+                import logging
+                logging.warning('Ignored exception', exc_info=True)
             time.sleep(0.4)
             self._progress = min(0.14, self._progress + 0.02)
 
