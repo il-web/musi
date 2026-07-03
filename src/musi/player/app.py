@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import theme
+from musi.player import backlight, theme
 from musi.player.input import Button, key_to_button
 from musi.player.mpd_client import MusiMPDClient, PlayerStatus
 from musi.player.screen import Screen
@@ -18,8 +18,22 @@ from musi.player.screen import Screen
 # ── constants ─────────────────────────────────────────────────────────────────
 DISPLAY_W, DISPLAY_H = 320, 480   # matches ST7796 — draw at this resolution
 WINDOW_W,  WINDOW_H  = 640, 960   # desktop window size (2× scale via GPU)
-FPS           = 30
-POLL_INTERVAL = 1.0               # seconds between MPD status polls
+ACTIVE_FPS      = 30              # while interacting / animating
+IDLE_FPS        = 10              # static screen — big CPU + SPI saver on the Zero W
+OFF_FPS         = 5               # screen off — just watch for the wake tap
+ACTIVE_WINDOW_S = 1.5             # stay at full FPS this long after the last input
+POLL_INTERVAL   = 1.0             # seconds between MPD status polls
+
+# Screen dims after MUSI_DIM_S and blanks (backlight off) after MUSI_OFF_S
+# seconds without touch/key input; 0 disables that stage. Any tap wakes it.
+DIM_AFTER_S = float(os.environ.get("MUSI_DIM_S", "30"))
+OFF_AFTER_S = float(os.environ.get("MUSI_OFF_S", "90"))
+
+_INPUT_EVENTS = (
+    pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP,
+    pygame.MOUSEMOTION, pygame.MOUSEWHEEL,
+    pygame.FINGERDOWN, pygame.FINGERMOTION, pygame.FINGERUP,
+)
 # Flag file written by the musi-bt-router service while it switches BT output
 # (contains the target device name); removed once MPD is back up.
 BT_CONNECTING_FLAG = "/tmp/musi-bt-connecting"
@@ -99,7 +113,9 @@ class App:
         try:
             name = open(BT_CONNECTING_FLAG).read().strip()
         except OSError:
+            self._bt_active = False
             return
+        self._bt_active = True
 
         dim = pygame.Surface((DISPLAY_W, DISPLAY_H), pygame.SRCALPHA)
         dim.fill((0, 0, 0, 170))
@@ -142,6 +158,14 @@ class App:
         self._touch_moved: float = 0.0
         self._captured:    bool  = False   # a screen grabbed this gesture as a drag
 
+        # screen power state (dim → backlight off after inactivity)
+        self._last_input: float = pygame.time.get_ticks() / 1000.0
+        self._screen_off: bool  = False
+        self._wake_flip:  bool  = False    # backlight on after next flip (fresh frame)
+        self._bt_active:  bool  = False    # BT-switch overlay currently showing
+        self._dim_surf:   pygame.Surface | None = None
+        backlight.set_on(True)             # recover if a previous run left it dark
+
         self.push(initial_screen)
         self._running = True
 
@@ -159,7 +183,16 @@ class App:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self._running = False
-                elif event.type == pygame.KEYDOWN:
+                    continue
+                if event.type in _INPUT_EVENTS:
+                    self._last_input = now
+                    if self._screen_off or self._wake_flip:
+                        # first input after screen-off only wakes the panel —
+                        # swallow it so the wake tap doesn't press anything
+                        self._screen_off = False
+                        self._wake_flip  = True
+                        continue
+                if event.type == pygame.KEYDOWN:
                     consumed = (
                         self._stack[-1].handle_event(event) if self._stack else False
                     )
@@ -215,6 +248,24 @@ class App:
                     if self._stack:
                         self._stack[-1].handle_scroll(event.y * 40)
 
+            # ── screen power (dim → off after inactivity) ─────────────────────
+            top_animates = bool(self._stack and self._stack[-1].animates)
+            if top_animates:
+                # animated screens (loading, transfers, updates) never sleep
+                self._last_input = now
+            idle = now - self._last_input
+
+            if OFF_AFTER_S > 0 and idle >= OFF_AFTER_S and not self._screen_off:
+                self._screen_off = True
+                surface.fill((0, 0, 0))
+                pygame.display.flip()      # blank the panel even without backlight ctl
+                backlight.set_on(False)
+
+            if self._screen_off:
+                # no drawing, no SPI traffic — just keep watching for the wake tap
+                clock.tick(OFF_FPS)
+                continue
+
             # ── draw ──────────────────────────────────────────────────────────
             # Extrapolate elapsed between polls so progress moves every frame
             # instead of jumping once per POLL_INTERVAL.
@@ -234,9 +285,32 @@ class App:
 
             self._draw_bt_overlay(surface)
 
-            pygame.display.flip()
-            clock.tick(FPS)
+            # dim stage — darken the finished frame
+            if DIM_AFTER_S > 0 and idle >= DIM_AFTER_S:
+                if self._dim_surf is None:
+                    self._dim_surf = pygame.Surface((DISPLAY_W, DISPLAY_H), pygame.SRCALPHA)
+                    self._dim_surf.fill((0, 0, 0, 150))
+                surface.blit(self._dim_surf, (0, 0))
 
+            pygame.display.flip()
+
+            if self._wake_flip:
+                # a fresh frame is on the panel — now light it up (no stale flash)
+                self._wake_flip = False
+                backlight.set_on(True)
+
+            # ── adaptive frame rate ───────────────────────────────────────────
+            interacting = (
+                idle < ACTIVE_WINDOW_S
+                or self._captured
+                or self._touch_start is not None
+            )
+            clock.tick(
+                ACTIVE_FPS if (interacting or top_animates or self._bt_active)
+                else IDLE_FPS
+            )
+
+        backlight.set_on(True)             # don't strand the panel dark on exit
         self._mpd.disconnect()
         pygame.quit()
 

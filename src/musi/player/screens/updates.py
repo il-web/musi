@@ -21,6 +21,7 @@ LOG_BOTTOM  = 388
 
 
 class UpdatesScreen(Screen):
+    animates = True   # staged progress popup — full FPS, never sleep mid-update
 
     def __init__(self, app) -> None:
         super().__init__(app)

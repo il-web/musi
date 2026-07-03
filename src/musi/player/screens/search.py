@@ -34,6 +34,7 @@ class _Result:
 
 
 class SearchScreen(Screen):
+    animates = True   # cursor blink + keyboard — keep responsive, no sleep
 
     def __init__(self, app) -> None:
         super().__init__(app)

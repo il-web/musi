@@ -47,6 +47,7 @@ class _Network:
 
 
 class WifiScreen(Screen):
+    animates = True   # scan/connect spinners — full FPS, no sleep
 
     def __init__(self, app) -> None:
         super().__init__(app)

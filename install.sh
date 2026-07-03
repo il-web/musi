@@ -152,8 +152,21 @@ sudo update-initramfs -u 2>/dev/null || true
 echo "  NOTE: add 'quiet splash plymouth.ignore-serial-consoles fbcon=map:10' to"
 echo "        /boot/firmware/cmdline.txt (one line) for the splash at boot."
 
-# ── 9b. power controls (Settings → Power) ─────────────────────────────────────
-say "[9b] Power-off / reboot permission"
+# ── 9b. backlight permissions (screen dim/off) ────────────────────────────────
+say "[9b] Backlight write access for screen auto-off"
+# The panel overlay (backlight-gpio=12) exposes a gpio-backlight device; let the
+# app (video group) switch it off after inactivity. Rule applies on every boot.
+sudo tee /etc/udev/rules.d/90-musi-backlight.rules > /dev/null <<'EOF'
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/sh -c 'chgrp video /sys/class/backlight/%k/brightness && chmod g+w /sys/class/backlight/%k/brightness'"
+EOF
+sudo udevadm control --reload-rules 2>/dev/null || true
+# also apply to devices already present this boot
+for b in /sys/class/backlight/*/brightness; do
+    [ -e "$b" ] && sudo chgrp video "$b" && sudo chmod g+w "$b"
+done
+
+# ── 9c. power controls (Settings → Power) ─────────────────────────────────────
+say "[9c] Power-off / reboot permission"
 echo "$USER_NAME ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i" \
     | sudo tee /etc/sudoers.d/musi-power > /dev/null
 sudo chmod 0440 /etc/sudoers.d/musi-power

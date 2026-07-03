@@ -26,6 +26,7 @@ def _local_ip() -> str:
 
 
 class USBScreen(Screen):   # keep class name so home.py import still works
+    animates = True   # transfer screen — stay awake while files come in
 
     def __init__(self, app) -> None:
         super().__init__(app)

@@ -72,10 +72,14 @@ class QueueItem:
 class MusiMPDClient:
     """Thread-safe(ish) MPD client for the musi player UI."""
 
+    # after a failed connect, don't retry for this long — a dead MPD would
+    # otherwise block the UI thread on every poll (connects run synchronously)
+    RETRY_BACKOFF_S = 3.0
+
     def __init__(
         self,
         music_root: Path,
-        host: str = "localhost",
+        host: str = "127.0.0.1",   # not "localhost" — avoids a 2 s IPv6 timeout
         port: int = 6600,
     ) -> None:
         self._music_root = Path(music_root)
@@ -84,6 +88,7 @@ class MusiMPDClient:
         self._client = mpd.MPDClient()
         self._client.timeout = 2
         self._connected = False
+        self._next_retry = 0.0
 
     # ── connection ────────────────────────────────────────────────────────────
 
@@ -91,9 +96,11 @@ class MusiMPDClient:
         try:
             self._client.connect(self._host, self._port)
             self._connected = True
+            self._next_retry = 0.0
             return True
         except Exception:
             self._connected = False
+            self._next_retry = time() + self.RETRY_BACKOFF_S
             return False
 
     def disconnect(self) -> None:
@@ -112,6 +119,8 @@ class MusiMPDClient:
                 return True
             except Exception:
                 self._connected = False
+        if time() < self._next_retry:
+            return False
         return self.connect()
 
     # ── status ────────────────────────────────────────────────────────────────

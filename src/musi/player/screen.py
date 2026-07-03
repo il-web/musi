@@ -15,6 +15,11 @@ if TYPE_CHECKING:
 
 
 class Screen(ABC):
+    # Screens with continuous animation (spinners, progress popups) set this
+    # True so the app keeps full frame rate and never dims/sleeps while they
+    # are on top.
+    animates: bool = False
+
     def __init__(self, app: "App") -> None:
         self.app = app
 

@@ -23,6 +23,7 @@ _MIN_SHOW_S = 1.5   # always show the screen at least this long
 
 
 class LoadingScreen(Screen):
+    animates = True   # eq bars + progress — full FPS, no sleep
 
     def __init__(self, app) -> None:
         super().__init__(app)
