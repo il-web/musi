@@ -19,6 +19,8 @@ ART_Y = 32
 INFO_Y   = ART_Y + ART_H + 12   # 264 title
 ARTIST_Y = INFO_Y + 26          # 290 artist
 BAR_Y    = ARTIST_Y + 28        # 318 progress bar
+BAR_X    = 16                   # progress bar left edge
+BAR_W    = 288                  # progress bar width (16 → 304)
 TIME_Y   = BAR_Y + 10           # 328 time
 CTRL_Y   = TIME_Y + 38          # 366 transport row
 SEC_Y    = CTRL_Y + 40          # 406 shuffle/repeat/queue row
@@ -50,8 +52,9 @@ class NowPlayingScreen(Screen):
         self._prev_meta:    str = ""
         self._prev_elapsed: int = -1   # whole seconds
 
-        # volume drag + static surfaces (built on first draw, after pygame.init)
-        self._drag_vol:   int | None = None              # live value while dragging
+        # volume / seek drag + static surfaces (built on first draw, after pygame.init)
+        self._drag_vol:   int   | None = None            # live value while dragging
+        self._drag_seek:  float | None = None            # 0.0–1.0 while scrubbing
         self._queue_lbl:  pygame.Surface | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
@@ -98,11 +101,20 @@ class NowPlayingScreen(Screen):
             _shadow(surface, self._meta_surf, r.x, r.y)
             surface.blit(self._meta_surf, r)
 
-        # 6 — progress bar
-        _draw_bar(surface, 16, BAR_Y, 288, 5, status.progress, self._accent)
+        # 6 — progress bar (scrub preview while dragging)
+        progress = self._drag_seek if self._drag_seek is not None else status.progress
+        _draw_bar(surface, BAR_X, BAR_Y, BAR_W, 5, progress, self._accent)
+        if self._drag_seek is not None:
+            knob_x = BAR_X + int(BAR_W * self._drag_seek)
+            pygame.draw.circle(surface, theme.WHITE, (knob_x, BAR_Y + 2), 7)
 
-        # 7 — time
-        if self._time_surf:
+        # 7 — time (target time while scrubbing)
+        if self._drag_seek is not None and status.duration > 0:
+            t  = f"{_fmt(self._drag_seek * status.duration)}  /  {_fmt(status.duration)}"
+            ts = theme.render(t, 11, theme.WHITE)
+            _shadow(surface, ts, 16, TIME_Y)
+            surface.blit(ts, (16, TIME_Y))
+        elif self._time_surf:
             _shadow(surface, self._time_surf, 16, TIME_Y)
             surface.blit(self._time_surf, (16, TIME_Y))
 
@@ -139,8 +151,10 @@ class NowPlayingScreen(Screen):
         if SEC_Y - 18 <= y <= SEC_Y + 18:
             if x < 90:
                 self.app.mpd.toggle_shuffle()
+                self.app.request_poll()
             elif x < 160:
                 self.app.mpd.toggle_repeat()
+                self.app.request_poll()
             elif x > 200:
                 self._open_queue()
             return None
@@ -149,24 +163,43 @@ class NowPlayingScreen(Screen):
             return Button.PLAY_PAUSE
         return None
 
-    # ── volume slider (drag gesture) ────────────────────────────────────────────
+    # ── volume slider + seek bar (drag gestures) ────────────────────────────────
 
     def on_press(self, x: int, y: int) -> bool:
+        # seek: grab anywhere on/near the progress bar (tap or scrub)
+        if BAR_Y - 14 <= y <= BAR_Y + 16 and BAR_X - 10 <= x <= BAR_X + BAR_W + 10:
+            if self.app.status.duration > 0:
+                self._drag_seek = self._seek_frac_from_x(x)
+                return True
+            return False
         if VOL_Y - 16 <= y <= VOL_Y + 16 and VOL_X - 14 <= x <= VOL_X + VOL_W + 14:
             self._set_vol_from_x(x)
             return True
         return False
 
     def on_drag(self, x: int, y: int) -> None:
-        self._set_vol_from_x(x)
+        if self._drag_seek is not None:
+            self._drag_seek = self._seek_frac_from_x(x)
+        else:
+            self._set_vol_from_x(x)
 
     def on_release(self, x: int, y: int) -> None:
+        if self._drag_seek is not None:
+            duration = self.app.status.duration
+            if duration > 0:
+                self.app.mpd.seek(self._drag_seek * duration)
+            self._drag_seek = None
         self._drag_vol = None
+        self.app.request_poll()
+
+    def _seek_frac_from_x(self, x: int) -> float:
+        return max(0.0, min(1.0, (x - BAR_X) / BAR_W))
 
     def _set_vol_from_x(self, x: int) -> None:
         vol = max(0, min(100, round((x - VOL_X) / VOL_W * 100)))
-        self._drag_vol = vol
-        self.app.mpd.set_volume(vol)
+        if vol != self._drag_vol:
+            self._drag_vol = vol
+            self.app.mpd.set_volume(vol)
 
     def _open_queue(self) -> None:
         from musi.player.screens.queue import QueueScreen
@@ -174,11 +207,11 @@ class NowPlayingScreen(Screen):
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         mpd = self.app.mpd
-        if   button == Button.PLAY_PAUSE: mpd.play_pause()
-        elif button == Button.NEXT:       mpd.next_track()
-        elif button == Button.PREV:       mpd.prev_track()
-        elif button == Button.VOL_UP:     mpd.set_volume(min(100, status.volume + 5))
-        elif button == Button.VOL_DOWN:   mpd.set_volume(max(0,   status.volume - 5))
+        if   button == Button.PLAY_PAUSE: self.app.toggle_play()
+        elif button == Button.NEXT:       mpd.next_track();  self.app.request_poll()
+        elif button == Button.PREV:       mpd.prev_track();  self.app.request_poll()
+        elif button == Button.VOL_UP:     mpd.set_volume(min(100, status.volume + 5)); self.app.request_poll()
+        elif button == Button.VOL_DOWN:   mpd.set_volume(max(0,   status.volume - 5)); self.app.request_poll()
         elif button == Button.BACK:       self.app.pop()
 
     # ── internal ──────────────────────────────────────────────────────────────

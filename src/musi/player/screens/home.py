@@ -149,7 +149,7 @@ class HomeScreen(Screen):
         elif button == Button.DOWN:
             self._sel = (self._sel + 1) % len(MENU)
         elif button == Button.PLAY_PAUSE:
-            self.app.mpd.play_pause()
+            self.app.toggle_play()
         elif button == Button.SELECT:
             self._open_selected()
 

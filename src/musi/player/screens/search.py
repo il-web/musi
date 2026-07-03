@@ -287,6 +287,7 @@ class SearchScreen(Screen):
             return
         paths = [r.path for r in self._results]
         self.app.mpd.play_paths(paths, start_index=self._sel)
+        self.app.request_poll()
         from musi.player.screens.now_playing import NowPlayingScreen
         self.app.push(NowPlayingScreen(self.app))
 

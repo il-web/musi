@@ -115,6 +115,7 @@ class QueueScreen(Screen):
             di = (y - LIST_Y) // ITEM_H + self._scroll
             if 0 <= di < len(self._items):
                 self.app.mpd.play_pos(self._items[di].pos)
+                self.app.request_poll()
         return None
 
     def handle_scroll(self, dy: float) -> None:

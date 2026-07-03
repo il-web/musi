@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pygame
@@ -38,6 +39,7 @@ class App:
         self._stack:           list[Screen] = []
         self._status:          PlayerStatus = PlayerStatus.disconnected()
         self._last_poll:       float        = 0.0
+        self._poll_time:       float        = 0.0   # when _status was fetched
         self._running:         bool         = False
         self._last_track_path: str | None   = None
 
@@ -68,6 +70,22 @@ class App:
 
     def quit(self) -> None:
         self._running = False
+
+    def request_poll(self) -> None:
+        """Force an MPD status refresh on the next frame.
+
+        Call after any command that changes player state so the UI reflects
+        it within one frame instead of waiting out POLL_INTERVAL.
+        """
+        self._last_poll = 0.0
+
+    def toggle_play(self) -> None:
+        """Play/pause with an optimistic local state flip for instant feedback."""
+        self._mpd.play_pause()
+        if self._status.connected:
+            new_state = "pause" if self._status.state == "play" else "play"
+            self._status = replace(self._status, state=new_state)
+        self.request_poll()
 
     # ── bluetooth switch overlay ────────────────────────────────────────────────
 
@@ -134,6 +152,7 @@ class App:
             if now - self._last_poll >= POLL_INTERVAL:
                 self._status    = self._mpd.poll()
                 self._last_poll = now
+                self._poll_time = now
                 self._maybe_record_play()
 
             # ── events ────────────────────────────────────────────────────────
@@ -197,9 +216,21 @@ class App:
                         self._stack[-1].handle_scroll(event.y * 40)
 
             # ── draw ──────────────────────────────────────────────────────────
+            # Extrapolate elapsed between polls so progress moves every frame
+            # instead of jumping once per POLL_INTERVAL.
+            draw_status = self._status
+            if draw_status.state == "play" and draw_status.duration > 0:
+                draw_status = replace(
+                    draw_status,
+                    elapsed=min(
+                        draw_status.duration,
+                        draw_status.elapsed + (now - self._poll_time),
+                    ),
+                )
+
             surface.fill((10, 10, 15))
             if self._stack:
-                self._stack[-1].draw(surface, self._status)
+                self._stack[-1].draw(surface, draw_status)
 
             self._draw_bt_overlay(surface)
 

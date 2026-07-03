@@ -245,6 +245,7 @@ class BrowseScreen(Screen):
     def _play_from(self, idx: int) -> None:
         paths = [item.path for item in self._items]
         self.app.mpd.play_paths(paths, start_index=idx)
+        self.app.request_poll()
         from musi.player.screens.now_playing import NowPlayingScreen
         self.app.push(NowPlayingScreen(self.app))
 
