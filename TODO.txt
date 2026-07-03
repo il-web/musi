@@ -52,21 +52,27 @@ NEXT PACKS (pick one)
       duplicated across home/browse/now_playing/statusbar)
     - Replace silent "except Exception: pass" with logging to journald
 
-[ ] Power button software (plan revised 2026-07-03 — Pololu dropped, too
-    expensive in IL; now: slide switch + momentary button, ~5-10 ILS)
-    - Hardware: slide switch (>=2A) in series battery+ -> boost VIN = true
-      off; momentary button -> GPIO17 + GND (internal pull-up)
-    - NOTE: GPIO3 halt-wake was rejected — GPIO3 is the touch SCL on this
-      build; with a slide switch it isn't needed anyway. GPIO4 now free.
-    - Software: GPIO17 listener inside the app (gpiozero/libgpiod, guarded
-      import so dev machines no-op): short press = screen toggle (reuse
-      backlight.set_on + app screen-off state), long press ~2s = clean
-      shutdown (sudoers already allows systemctl poweroff)
-    - Power-off UX: long-press -> screen goes dark -> user flips the switch
-      (forgetting the flip leaves a halted Pi draining ~1-3 days)
-    - Do the OS hardening pack FIRST — overlay FS makes an accidental
-      hard flip harmless
-    - Enclosure: add slide-switch cutout (replaces pending Pololu placement)
+[ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
+    6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)
+    - Circuit: P-MOSFET Q1 in series TP4056 OUT+ -> MT3608 VIN
+      (NDP6020P TO-220, or DMG3415U/SI2333 SOT-23 on DIP adapter;
+      low Rds at Vgs -3V, >=2A). R1 100k gate->source.
+      Button (momentary, to GND) tees to:
+        (a) Q1 gate via 1N4148 (anode at gate) = hardware power-on while held
+        (b) GPIO17 (internal pull-up)         = software press sensing
+      Q2 2N7000: drain->Q1 gate, source->GND, gate <- 10k <- GPIO4 (hold)
+    - config.txt:  gpio=4=op,dh                      (firmware hold at ~2s;
+                                                      this IS long-press-to-on)
+                   dtoverlay=gpio-poweroff,gpiopin=4,active_low
+                                                     (drops hold AFTER clean
+                                                      shutdown -> power cut)
+    - Behavior: hold ~2-3s = power on; button can NOT hard-cut while running;
+      short press = screen toggle, long press ~2s = systemctl poweroff ->
+      self power-cut. True off = zero drain.
+    - Software: GPIO17 listener thread in the app (gpiozero/libgpiod, guarded
+      import so dev machines no-op); reuse backlight.set_on + screen-off state
+    - Enclosure: only a button hole needed (no slide-switch cutout)
+    - Do the OS hardening pack first anyway (general hard-cut insurance)
 
 PI MAINTENANCE NOTES
 --------------------
