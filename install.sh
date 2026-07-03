@@ -170,7 +170,7 @@ say "[9c] Power-off / reboot permission"
 # Sudoers rules must be a single line; a malformed sudoers.d file makes every
 # sudo call print parse errors. Validate with visudo before installing.
 TMP_SUDOERS="$(mktemp)"
-printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i\n' \
+printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i, /usr/bin/nmcli *\n' \
     "$USER_NAME" > "$TMP_SUDOERS"
 if sudo visudo -c -f "$TMP_SUDOERS" > /dev/null; then
     sudo install -m 0440 -o root -g root "$TMP_SUDOERS" /etc/sudoers.d/musi-power

@@ -249,13 +249,18 @@ class App:
                         self._stack[-1].handle_scroll(event.y * 40)
 
             # ── screen power (dim → off after inactivity) ─────────────────────
-            top_animates = bool(self._stack and self._stack[-1].animates)
+            top = self._stack[-1] if self._stack else None
+            top_animates = bool(top and top.animates)
             if top_animates:
                 # animated screens (loading, transfers, updates) never sleep
                 self._last_input = now
             idle = now - self._last_input
 
-            if OFF_AFTER_S > 0 and idle >= OFF_AFTER_S and not self._screen_off:
+            # screens may override the timeouts (e.g. Now Playing stays on)
+            dim_after = top.dim_after if top and top.dim_after is not None else DIM_AFTER_S
+            off_after = top.off_after if top and top.off_after is not None else OFF_AFTER_S
+
+            if off_after > 0 and idle >= off_after and not self._screen_off:
                 self._screen_off = True
                 surface.fill((0, 0, 0))
                 pygame.display.flip()      # blank the panel even without backlight ctl
@@ -286,7 +291,7 @@ class App:
             self._draw_bt_overlay(surface)
 
             # dim stage — darken the finished frame
-            if DIM_AFTER_S > 0 and idle >= DIM_AFTER_S:
+            if dim_after > 0 and idle >= dim_after:
                 if self._dim_surf is None:
                     self._dim_surf = pygame.Surface((DISPLAY_W, DISPLAY_H), pygame.SRCALPHA)
                     self._dim_surf.fill((0, 0, 0, 150))

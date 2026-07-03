@@ -20,6 +20,11 @@ class Screen(ABC):
     # are on top.
     animates: bool = False
 
+    # Per-screen overrides for the inactivity timeouts, in seconds.
+    # None → use the app-wide MUSI_DIM_S / MUSI_OFF_S defaults.
+    dim_after: "float | None" = None
+    off_after: "float | None" = None
+
     def __init__(self, app: "App") -> None:
         self.app = app
 

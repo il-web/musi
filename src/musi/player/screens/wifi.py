@@ -11,22 +11,16 @@ import pygame
 
 from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
+from musi.player.keyboard import Keyboard
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
-
-# ── character wheel for Pi button input ───────────────────────────────────────
-_CHARS = list(
-    "abcdefghijklmnopqrstuvwxyz"
-    "0123456789"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    " !@#$%&*()-_=+.,?/"
-)
 
 # ── layout ────────────────────────────────────────────────────────────────────
 LIST_Y  = 64
 ITEM_H  = 50
 NAV_Y   = 456
 MAX_VIS = (NAV_Y - LIST_Y) // ITEM_H   # 7
+KB_TOP  = 318                          # on-screen keyboard (password entry)
 
 # ── states ────────────────────────────────────────────────────────────────────
 _S_SCANNING   = "scanning"
@@ -46,6 +40,24 @@ class _Network:
     connected: bool = False
 
 
+def _nmcli(args: list, timeout: float) -> subprocess.CompletedProcess:
+    """Run nmcli; on a polkit denial retry via passwordless sudo.
+
+    The app runs as a systemd user service, which polkit does not treat as an
+    active local session, so device control can be denied. install.sh grants
+    the user NOPASSWD sudo for nmcli as the fallback path.
+    """
+    r = subprocess.run(["nmcli", *args],
+                       capture_output=True, text=True, timeout=timeout)
+    err = (r.stderr or "").lower()
+    if r.returncode != 0 and any(s in err for s in (
+            "not authorized", "insufficient privileges",
+            "permission denied", "access denied")):
+        r = subprocess.run(["sudo", "-n", "nmcli", *args],
+                           capture_output=True, text=True, timeout=timeout)
+    return r
+
+
 class WifiScreen(Screen):
     animates = True   # scan/connect spinners — full FPS, no sleep
 
@@ -59,7 +71,8 @@ class WifiScreen(Screen):
         # password entry
         self._target:   _Network | None = None
         self._password: str             = ""
-        self._char_idx: int             = 0       # char wheel position
+        self._kb:       Keyboard        = Keyboard(KB_TOP)
+        self._pwd_t:    float           = 0.0     # last char typed (peek timer)
 
         # result message
         self._message:  str = ""
@@ -95,6 +108,7 @@ class WifiScreen(Screen):
             return False
         if event.unicode and event.unicode.isprintable():
             self._password += event.unicode
+            self._pwd_t = time.monotonic()
             return True
         return False
 
@@ -109,7 +123,29 @@ class WifiScreen(Screen):
                 self._clamp_scroll()
                 self._handle_list(Button.SELECT)
                 return None
+        if self._state == _S_PASSWORD:
+            if y >= KB_TOP:                       # tap on the on-screen keyboard
+                self._on_key(self._kb.key_at(x, y))
+                return None
+            if y < 26:                            # status bar = cancel
+                self._state = _S_LIST
+            return None
+        if self._state in (_S_DONE, _S_ERROR, _S_UNSUPPORTED):
+            return Button.BACK                    # tap anywhere to dismiss
         return super().handle_touch(x, y)
+
+    def _on_key(self, key: "str | None") -> None:
+        if key is None:
+            return
+        if key == "ENTER":
+            self._do_connect()
+        elif key == "BACKSPACE":
+            self._password = self._password[:-1]
+        elif key == "SPACE":
+            self._password += " "
+        elif len(key) == 1:
+            self._password += key
+            self._pwd_t = time.monotonic()
 
     # ── button input ─────────────────────────────────────────────────────────
 
@@ -118,9 +154,12 @@ class WifiScreen(Screen):
             self._handle_list(button)
         elif self._state == _S_PASSWORD:
             self._handle_password(button)
-        elif self._state in (_S_DONE, _S_ERROR, _S_UNSUPPORTED):
+        elif self._state in (_S_DONE, _S_UNSUPPORTED):
             if button == Button.BACK:
                 self.app.pop()
+        elif self._state == _S_ERROR:
+            if button == Button.BACK:
+                self._state = _S_LIST   # back to the list to retry
         elif self._state == _S_SCANNING:
             if button == Button.BACK:
                 self.app.pop()
@@ -138,7 +177,8 @@ class WifiScreen(Screen):
                 if net.secured:
                     self._target   = net
                     self._password = ""
-                    self._char_idx = 0
+                    self._kb.layer = 0
+                    self._kb.shift = False
                     self._state    = _S_PASSWORD
                 else:
                     self._target = net
@@ -151,45 +191,39 @@ class WifiScreen(Screen):
             threading.Thread(target=self._scan, daemon=True).start()
 
     def _handle_password(self, button: Button) -> None:
-        if button == Button.UP:
-            self._char_idx = (self._char_idx - 1) % len(_CHARS)
-        elif button == Button.DOWN:
-            self._char_idx = (self._char_idx + 1) % len(_CHARS)
-        elif button == Button.SELECT:
-            # Add current char from wheel
-            self._password += _CHARS[self._char_idx]
-        elif button == Button.BACK:
+        # typing comes via handle_event (real keyboard) or _on_key (on-screen)
+        if button == Button.BACK:
             if self._password:
                 self._password = self._password[:-1]
             else:
                 self._state = _S_LIST
         elif button == Button.PLAY_PAUSE:
             self._do_connect()
-        elif button == Button.NEXT:
-            # Quick-add space
-            self._password += " "
-        elif button == Button.PREV:
-            # Delete last char
-            if self._password:
-                self._password = self._password[:-1]
 
     # ── scan ─────────────────────────────────────────────────────────────────
 
     def _scan(self) -> None:
         try:
-            r = subprocess.run(
-                ["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY",
+            # SSID requested LAST so ":" inside a network name can't shift the
+            # other fields (split is limited to the first three separators).
+            r = _nmcli(
+                ["-t", "-f", "IN-USE,SIGNAL,SECURITY,SSID",
                  "device", "wifi", "list", "--rescan", "yes"],
-                capture_output=True, text=True, timeout=20,
+                timeout=25,
             )
+            if r.returncode != 0:
+                self._message = (r.stderr.strip() or r.stdout.strip()
+                                 or "WiFi scan failed")[:80]
+                self._state   = _S_ERROR
+                return
             nets: list[_Network] = []
             seen: set[str] = set()
             for line in r.stdout.strip().splitlines():
                 parts = line.split(":", 3)
                 if len(parts) < 4:
                     continue
-                in_use, ssid, sig, sec = parts
-                ssid = ssid.strip()
+                in_use, sig, sec, ssid = parts
+                ssid = ssid.replace("\\:", ":").strip()   # nmcli -t escapes ':'
                 if not ssid or ssid in seen:
                     continue
                 seen.add(ssid)
@@ -213,17 +247,19 @@ class WifiScreen(Screen):
     def _do_connect(self) -> None:
         if not self._target:
             return
+        if self._target.secured and not self._password:
+            return   # secured network needs a password before connecting
         self._state = _S_CONNECTING
         net = self._target
         pwd = self._password
         threading.Thread(target=self._connect_thread, args=(net, pwd), daemon=True).start()
 
     def _connect_thread(self, net: _Network, password: str) -> None:
-        cmd = ["nmcli", "device", "wifi", "connect", net.ssid]
+        args = ["device", "wifi", "connect", net.ssid]
         if net.secured and password:
-            cmd += ["password", password]
+            args += ["password", password]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            r = _nmcli(args, timeout=45)
             if r.returncode == 0:
                 # Get IP
                 try:
@@ -237,8 +273,16 @@ class WifiScreen(Screen):
                 self._message = f"Connected to {net.ssid}"
                 self._state   = _S_DONE
             else:
-                self._message = (r.stderr.strip() or r.stdout.strip()
-                                 or "Connection failed")[:80]
+                # a failed attempt leaves a broken profile behind — remove it
+                # so the next try starts clean (only when we sent a password)
+                if net.secured and password:
+                    try:
+                        _nmcli(["connection", "delete", "id", net.ssid], timeout=10)
+                    except Exception:
+                        pass
+                raw = (r.stderr.strip() or r.stdout.strip() or "Connection failed")
+                self._message = ("Wrong password" if "secret" in raw.lower()
+                                 else raw[:80])
                 self._state   = _S_ERROR
         except subprocess.TimeoutExpired:
             self._message = "Connection timed out"
@@ -334,55 +378,31 @@ class WifiScreen(Screen):
     def _draw_password(self, surface: pygame.Surface) -> None:
         # target SSID
         net_s = theme.render(
-            f"Connect to: {self._target.ssid}" if self._target else "Password",
+            f"Password for {self._target.ssid}" if self._target else "Password",
             13, theme.WHITE, bold=True, max_width=296,
         )
-        surface.blit(net_s, net_s.get_rect(centerx=160, y=68))
+        surface.blit(net_s, net_s.get_rect(centerx=160, y=64))
 
         # password box
-        box_rect = pygame.Rect(8, 98, 304, 42)
+        box_rect = pygame.Rect(8, 92, 304, 42)
         pygame.draw.rect(surface, (28, 28, 42), box_rect, border_radius=6)
         pygame.draw.rect(surface, theme.ACCENT, box_rect, 1, border_radius=6)
 
-        t           = time.monotonic()
-        cursor      = "|" if int(t * 2) % 2 == 0 else " "
-        display_pwd = "•" * len(self._password) + cursor
-        pwd_s       = theme.render(display_pwd, 13, theme.WHITE, max_width=290)
-        surface.blit(pwd_s, (18, 107))
+        # mask with bullets; briefly show the last typed char (phone-style peek)
+        t      = time.monotonic()
+        cursor = "|" if int(t * 2) % 2 == 0 else " "
+        if self._password and (t - self._pwd_t) < 1.0:
+            shown = "•" * (len(self._password) - 1) + self._password[-1]
+        else:
+            shown = "•" * len(self._password)
+        pwd_s = theme.render(shown + cursor, 14, theme.WHITE, max_width=290)
+        surface.blit(pwd_s, (18, box_rect.y + (42 - pwd_s.get_height()) // 2))
 
-        # ── character wheel ───────────────────────────────────────────────────
-        pygame.draw.line(surface, (35, 35, 50), (8, 152), (312, 152), 1)
-        whl_s = theme.render("▲ ▼ scroll  •  Enter / ▶‖ = connect  •  Esc = back",
-                             9, theme.DIM, max_width=296)
-        surface.blit(whl_s, whl_s.get_rect(centerx=160, y=160))
+        hint = theme.render("✓ = connect   ·   tap top bar = cancel", 10, theme.DIM)
+        surface.blit(hint, hint.get_rect(centerx=160, y=146))
 
-        # show prev / current / next chars
-        prev_c = _CHARS[(self._char_idx - 1) % len(_CHARS)]
-        curr_c = _CHARS[self._char_idx]
-        next_c = _CHARS[(self._char_idx + 1) % len(_CHARS)]
-
-        prev_s = theme.render(repr(prev_c)[1:-1], 14, theme.DIM)
-        curr_s = theme.render(repr(curr_c)[1:-1], 26, theme.WHITE, bold=True)
-        next_s = theme.render(repr(next_c)[1:-1], 14, theme.DIM)
-
-        # highlight box behind current char — centered vertically at 220
-        pygame.draw.rect(surface, theme.CARD_BG,
-                         pygame.Rect(132, 196, 56, 48), border_radius=6)
-        pygame.draw.rect(surface, theme.ACCENT,
-                         pygame.Rect(132, 196, 56, 48), 1, border_radius=6)
-
-        surface.blit(curr_s, curr_s.get_rect(centerx=160, centery=220))
-        surface.blit(prev_s, prev_s.get_rect(centerx=84,  centery=220))
-        surface.blit(next_s, next_s.get_rect(centerx=236, centery=220))
-
-        # arrows
-        arr_col = theme.DIM
-        pygame.draw.polygon(surface, arr_col, [(160, 186), (154, 196), (166, 196)])
-        pygame.draw.polygon(surface, arr_col, [(160, 254), (154, 244), (166, 244)])
-
-        # select hint
-        sel_s = theme.render("Select = add char", 10, theme.DIM)
-        surface.blit(sel_s, sel_s.get_rect(centerx=160, y=268))
+        # ── on-screen keyboard ────────────────────────────────────────────────
+        self._kb.draw(surface)
 
     def _draw_connecting(self, surface: pygame.Surface) -> None:
         _spinner(surface, 160, 230, time.monotonic() - self._spin_t)

@@ -30,6 +30,10 @@ VOL_W    = 224                  # slider width (40 → 264)
 
 
 class NowPlayingScreen(Screen):
+    # Stay visible while listening: dim only after 15 min, screen off a
+    # minute after that (other screens use the much shorter global defaults).
+    dim_after = 15 * 60
+    off_after = 16 * 60
 
     def __init__(self, app) -> None:
         super().__init__(app)
