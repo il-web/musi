@@ -14,6 +14,7 @@ from musi.player.input import Button
 from musi.player.keyboard import Keyboard
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
+from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
 
 # ── layout ────────────────────────────────────────────────────────────────────
 LIST_Y  = 64
@@ -66,7 +67,8 @@ class WifiScreen(Screen):
         self._state:    str            = _S_SCANNING
         self._networks: list[_Network] = []
         self._sel:      int            = 0
-        self._scroll:   int            = 0
+        self._klist = KineticList(ITEM_H, NAV_Y - LIST_Y)
+        self._tap   = PendingTap()
 
         # password entry
         self._target:   _Network | None = None
@@ -115,13 +117,12 @@ class WifiScreen(Screen):
     # ── touch input ──────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
-        if self._state == _S_LIST and LIST_Y <= y < NAV_Y - 24:
-            vi = (y - LIST_Y) // ITEM_H
-            di = vi + self._scroll
+        if self._state == _S_LIST and LIST_Y <= y < NAV_Y - 24 \
+                and not self._tap.pending:
+            di = self._klist.index_at(y - LIST_Y)
             if 0 <= di < len(self._networks):
-                self._sel = di
-                self._clamp_scroll()
-                self._handle_list(Button.SELECT)
+                self._sel = di                # highlight flashes, then opens
+                self._tap.set(lambda: self._handle_list(Button.SELECT))
                 return None
         if self._state == _S_PASSWORD:
             if y >= KB_TOP:                       # tap on the on-screen keyboard
@@ -133,6 +134,16 @@ class WifiScreen(Screen):
         if self._state in (_S_DONE, _S_ERROR, _S_UNSUPPORTED):
             return Button.BACK                    # tap anywhere to dismiss
         return super().handle_touch(x, y)
+
+    def handle_scroll(self, dy: float) -> None:
+        if self._state == _S_LIST:
+            self._klist.scroll_by(dy)
+
+    def handle_scroll_start(self) -> None:
+        self._klist.start_touch()
+
+    def handle_scroll_end(self) -> None:
+        self._klist.end_touch()
 
     def _on_key(self, key: "str | None") -> None:
         if key is None:
@@ -236,7 +247,7 @@ class WifiScreen(Screen):
             nets.sort(key=lambda n: (-n.connected, -n.signal))
             self._networks = nets
             self._sel      = 0
-            self._scroll   = 0
+            self._klist.set_count(len(nets), reset=True)
             self._state    = _S_LIST
         except Exception as exc:
             self._message = str(exc)
@@ -335,12 +346,18 @@ class WifiScreen(Screen):
         ref_s = theme.render("Space = refresh", 9, theme.DIM)
         surface.blit(ref_s, ref_s.get_rect(right=312, y=28))
 
-        for vi in range(MAX_VIS):
-            di = vi + self._scroll
+        self._klist.update()
+        self._tap.update()
+        first = self._klist.first_visible()
+        shift = self._klist.pixel_shift()
+        clip  = surface.get_clip()
+        surface.set_clip(pygame.Rect(0, LIST_Y, 320, NAV_Y - LIST_Y))
+        for vi in range(self._klist.visible_rows()):
+            di = first + vi
             if di >= len(self._networks):
                 break
             net = self._networks[di]
-            y   = LIST_Y + vi * ITEM_H
+            y   = LIST_Y + vi * ITEM_H - shift
             sel = (di == self._sel)
 
             rect = pygame.Rect(8, y, 304, ITEM_H - 3)
@@ -371,9 +388,8 @@ class WifiScreen(Screen):
                 surface.blit(ck_s, ck_s.get_rect(right=306,
                              centery=y + (ITEM_H - 3) // 2))
 
-        if len(self._networks) > MAX_VIS:
-            _scrollbar(surface, 314, LIST_Y, NAV_Y - LIST_Y,
-                       len(self._networks), self._scroll, MAX_VIS)
+        surface.set_clip(clip)
+        draw_scrollbar(surface, 314, LIST_Y, NAV_Y - LIST_Y, self._klist)
 
     def _draw_password(self, surface: pygame.Surface) -> None:
         # target SSID
@@ -441,10 +457,7 @@ class WifiScreen(Screen):
     # ── scroll ────────────────────────────────────────────────────────────────
 
     def _clamp_scroll(self) -> None:
-        if self._sel < self._scroll:
-            self._scroll = self._sel
-        elif self._sel >= self._scroll + MAX_VIS:
-            self._scroll = self._sel - MAX_VIS + 1
+        self._klist.ensure_visible(self._sel)
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────────
@@ -478,12 +491,3 @@ def _lock(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
                     pygame.Rect(cx - 4, cy - 8, 8, 8), 0, 3.14159, 2)
 
 
-def _scrollbar(
-    surface: pygame.Surface,
-    x: int, y: int, h: int,
-    total: int, scroll: int, vis: int,
-) -> None:
-    pygame.draw.rect(surface, (30, 30, 44), (x, y, 2, h), border_radius=1)
-    thumb_h = max(16, int(h * vis / total))
-    thumb_y = y + int((h - thumb_h) * scroll / max(1, total - vis))
-    pygame.draw.rect(surface, theme.DIM, (x, thumb_y, 2, thumb_h), border_radius=1)

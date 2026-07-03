@@ -11,6 +11,7 @@ from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
+from musi.player.widgets import PendingTap
 
 # Menu items: (label, screen_import_fn)
 MENU = [
@@ -46,6 +47,7 @@ class HomeScreen(Screen):
         # static (built on first draw)
         self._nav_surf:   pygame.Surface | None = None
         self._menu_surfs: list[pygame.Surface] = []
+        self._tap = PendingTap()
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -61,6 +63,7 @@ class HomeScreen(Screen):
 
         self._reload_art(status)
         self._update_text(status)
+        self._tap.update()
 
         # ── background ────────────────────────────────────────────────────────
         surface.fill(theme.BG)
@@ -134,12 +137,12 @@ class HomeScreen(Screen):
         # Tap mini now-playing card → play/pause
         if CARD_Y <= y < CARD_Y + CARD_H:
             return Button.PLAY_PAUSE
-        # Tap a menu item → open it directly
-        if MENU_Y <= y < MENU_Y + len(MENU) * ITEM_H:
+        # Tap a menu item → highlight flashes, then it opens
+        if MENU_Y <= y < MENU_Y + len(MENU) * ITEM_H and not self._tap.pending:
             i = (y - MENU_Y) // ITEM_H
             if 0 <= i < len(MENU):
                 self._sel = i
-                self._open_selected()
+                self._tap.set(self._open_selected)
                 return None
         return super().handle_touch(x, y)
 

@@ -68,6 +68,18 @@ class Screen(ABC):
         List screens override this to move their scroll offset; default no-op.
         """
 
+    def handle_scroll_start(self) -> None:
+        """Finger/mouse down that may become a scroll — stop any coasting."""
+
+    def handle_scroll_end(self) -> None:
+        """Scroll gesture released — list screens start momentum coasting."""
+
+    def handle_long_press(self, x: int, y: int) -> bool:
+        """Finger held ~0.5 s without moving. Return True if handled —
+        the release then does NOT fire as a tap. Default: not handled.
+        """
+        return False
+
     # ── press / drag / release gesture (volume slider, queue reorder) ──────────
 
     def on_press(self, x: int, y: int) -> bool:

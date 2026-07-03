@@ -23,6 +23,8 @@ IDLE_FPS        = 10              # static screen — big CPU + SPI saver on the
 OFF_FPS         = 5               # screen off — just watch for the wake tap
 ACTIVE_WINDOW_S = 1.5             # stay at full FPS this long after the last input
 POLL_INTERVAL   = 1.0             # seconds between MPD status polls
+TAP_SLOP_PX     = 12              # movement below this still counts as a tap
+LONG_PRESS_S    = 0.5             # hold this long without moving → long-press
 
 # Screen dims after MUSI_DIM_S and blanks (backlight off) after MUSI_OFF_S
 # seconds without touch/key input; 0 disables that stage. Any tap wakes it.
@@ -153,10 +155,13 @@ class App:
         surface = pygame.display.get_surface()
         clock   = pygame.time.Clock()
 
-        # touch-drag state — lets us tell a tap from a scroll swipe / drag gesture
-        self._touch_start: tuple[int, int] | None = None
-        self._touch_moved: float = 0.0
-        self._captured:    bool  = False   # a screen grabbed this gesture as a drag
+        # touch-drag state — tells taps, scroll swipes, drags and long-presses apart
+        self._touch_start:  tuple[int, int] | None = None
+        self._touch_t:      float = 0.0    # when the gesture began
+        self._touch_moved:  float = 0.0
+        self._captured:     bool  = False  # a screen grabbed this gesture as a drag
+        self._long_checked: bool  = False  # long-press already evaluated
+        self._long_fired:   bool  = False  # long-press handled → swallow the tap
 
         # screen power state (dim → backlight off after inactivity)
         self._last_input: float = pygame.time.get_ticks() / 1000.0
@@ -200,53 +205,42 @@ class App:
                         btn = key_to_button(event.key)
                         if btn and self._stack:
                             self._stack[-1].handle(btn, self._status)
+                # Touch and mouse share one gesture flow: press → move → release.
+                # KMSDRM delivers touches as finger events; the desktop window
+                # sends mouse events. A screen may grab the gesture as a drag
+                # (volume/seek slider, queue reorder) via on_press; otherwise
+                # motion scrolls, a still hold long-presses, a short tap taps.
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    if self._stack:
-                        scr = self._stack[-1]
-                        self._captured = scr.on_press(*event.pos)
-                        if not self._captured:
-                            btn = scr.handle_touch(*event.pos)
-                            if btn is not None:
-                                scr.handle(btn, self._status)
+                    self._begin_touch(*event.pos, now)
                 elif event.type == pygame.MOUSEMOTION:
-                    if self._captured and event.buttons[0] and self._stack:
-                        self._stack[-1].on_drag(*event.pos)
+                    if event.buttons[0]:
+                        self._move_touch(*event.pos, event.rel[0], event.rel[1])
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                    if self._captured and self._stack:
-                        self._stack[-1].on_release(*event.pos)
-                    self._captured = False
+                    self._end_touch(*event.pos)
                 elif event.type == pygame.FINGERDOWN:
-                    # KMSDRM delivers touches as finger events. A screen may grab the
-                    # gesture as a drag (volume slider / queue reorder) via on_press;
-                    # otherwise motion scrolls and a small move counts as a tap.
-                    x = int(event.x * DISPLAY_W); y = int(event.y * DISPLAY_H)
-                    self._touch_start = (x, y)
-                    self._touch_moved = 0.0
-                    self._captured = bool(self._stack and self._stack[-1].on_press(x, y))
+                    self._begin_touch(int(event.x * DISPLAY_W),
+                                      int(event.y * DISPLAY_H), now)
                 elif event.type == pygame.FINGERMOTION:
-                    if self._touch_start is not None and self._stack:
-                        x = int(event.x * DISPLAY_W); y = int(event.y * DISPLAY_H)
-                        dy = event.dy * DISPLAY_H
-                        self._touch_moved += abs(event.dx * DISPLAY_W) + abs(dy)
-                        if self._captured:
-                            self._stack[-1].on_drag(x, y)
-                        else:
-                            self._stack[-1].handle_scroll(dy)
+                    self._move_touch(int(event.x * DISPLAY_W),
+                                     int(event.y * DISPLAY_H),
+                                     event.dx * DISPLAY_W, event.dy * DISPLAY_H)
                 elif event.type == pygame.FINGERUP:
-                    if self._touch_start is not None and self._stack:
-                        x = int(event.x * DISPLAY_W); y = int(event.y * DISPLAY_H)
-                        if self._captured:
-                            self._stack[-1].on_release(x, y)
-                        elif self._touch_moved < 12:    # barely moved → a tap
-                            scr = self._stack[-1]
-                            btn = scr.handle_touch(*self._touch_start)
-                            if btn is not None:
-                                scr.handle(btn, self._status)
-                    self._touch_start = None
-                    self._captured = False
+                    self._end_touch(int(event.x * DISPLAY_W),
+                                    int(event.y * DISPLAY_H))
                 elif event.type == pygame.MOUSEWHEEL:
                     if self._stack:
                         self._stack[-1].handle_scroll(event.y * 40)
+
+            # ── long-press: finger held still, gesture not captured ────────────
+            if (self._touch_start is not None and not self._captured
+                    and not self._long_checked
+                    and self._touch_moved < TAP_SLOP_PX
+                    and now - self._touch_t >= LONG_PRESS_S):
+                self._long_checked = True
+                if self._stack:
+                    self._long_fired = bool(
+                        self._stack[-1].handle_long_press(*self._touch_start)
+                    )
 
             # ── screen power (dim → off after inactivity) ─────────────────────
             top = self._stack[-1] if self._stack else None
@@ -318,6 +312,44 @@ class App:
         backlight.set_on(True)             # don't strand the panel dark on exit
         self._mpd.disconnect()
         pygame.quit()
+
+    # ── unified touch/mouse gesture flow ──────────────────────────────────────
+
+    def _begin_touch(self, x: int, y: int, now: float) -> None:
+        if not self._stack:
+            return
+        scr = self._stack[-1]
+        self._touch_start  = (x, y)
+        self._touch_t      = now
+        self._touch_moved  = 0.0
+        self._long_checked = False
+        self._long_fired   = False
+        self._captured     = bool(scr.on_press(x, y))
+        if not self._captured:
+            scr.handle_scroll_start()
+
+    def _move_touch(self, x: int, y: int, dx: float, dy: float) -> None:
+        if self._touch_start is None or not self._stack:
+            return
+        self._touch_moved += abs(dx) + abs(dy)
+        if self._captured:
+            self._stack[-1].on_drag(x, y)
+        else:
+            self._stack[-1].handle_scroll(dy)
+
+    def _end_touch(self, x: int, y: int) -> None:
+        if self._touch_start is not None and self._stack:
+            scr = self._stack[-1]
+            if self._captured:
+                scr.on_release(x, y)
+            else:
+                scr.handle_scroll_end()
+                if self._touch_moved < TAP_SLOP_PX and not self._long_fired:
+                    btn = scr.handle_touch(*self._touch_start)
+                    if btn is not None:
+                        scr.handle(btn, self._status)
+        self._touch_start = None
+        self._captured    = False
 
     # ── internal ──────────────────────────────────────────────────────────────
 

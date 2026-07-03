@@ -12,6 +12,7 @@ from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus, QueueItem
 from musi.player.screen import Screen
+from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
 
 LIST_Y      = 58
 ITEM_H      = 50
@@ -25,9 +26,9 @@ class QueueScreen(Screen):
 
     def __init__(self, app) -> None:
         super().__init__(app)
-        self._items:     list[QueueItem] = []
-        self._scroll:    int   = 0
-        self._scroll_px: float = 0.0
+        self._items: list[QueueItem] = []
+        self._klist = KineticList(ITEM_H, NAV_Y - LIST_Y)
+        self._tap   = PendingTap()
         # drag-reorder state
         self._drag_idx:  int | None = None   # current index of dragged row
         self._drag_orig: int = 0             # its original MPD position
@@ -37,12 +38,11 @@ class QueueScreen(Screen):
         self._hint: pygame.Surface | None = None
 
     def on_enter(self) -> None:
-        self._refresh()
+        self._refresh(reset=True)
 
-    def _refresh(self) -> None:
-        self._items    = self.app.mpd.queue()
-        self._scroll   = 0
-        self._scroll_px = 0.0
+    def _refresh(self, reset: bool = False) -> None:
+        self._items = self.app.mpd.queue()
+        self._klist.set_count(len(self._items), reset=reset)
 
     # ── draw ────────────────────────────────────────────────────────────────────
 
@@ -61,21 +61,27 @@ class QueueScreen(Screen):
             msg = theme.render("Queue is empty", 13, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=220))
         else:
-            for vi in range(MAX_VIS):
-                di = vi + self._scroll
+            self._klist.update()
+            self._tap.update()
+            first = self._klist.first_visible()
+            shift = self._klist.pixel_shift()
+            clip  = surface.get_clip()
+            surface.set_clip(pygame.Rect(0, LIST_Y, 320, NAV_Y - LIST_Y))
+            for vi in range(self._klist.visible_rows()):
+                di = first + vi
                 if di >= len(self._items):
                     break
                 if di == self._drag_idx:
                     continue   # the dragged row is drawn floating, below
-                self._draw_row(surface, LIST_Y + vi * ITEM_H, di, status, lifted=False)
+                self._draw_row(surface, LIST_Y + vi * ITEM_H - shift, di,
+                               status, lifted=False)
 
             if self._drag_idx is not None:
                 y = max(LIST_Y, min(NAV_Y - ITEM_H, self._drag_y - ITEM_H // 2))
                 self._draw_row(surface, y, self._drag_idx, status, lifted=True)
+            surface.set_clip(clip)
 
-            if len(self._items) > MAX_VIS:
-                _scrollbar(surface, 315, LIST_Y, NAV_Y - LIST_Y,
-                           len(self._items), self._scroll, MAX_VIS)
+            draw_scrollbar(surface, 315, LIST_Y, NAV_Y - LIST_Y, self._klist)
 
         surface.blit(self._hint, self._hint.get_rect(centerx=160, y=NAV_Y + 2))
 
@@ -111,33 +117,51 @@ class QueueScreen(Screen):
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
             return Button.BACK
-        if LIST_Y <= y < NAV_Y:
-            di = (y - LIST_Y) // ITEM_H + self._scroll
+        if LIST_Y <= y < NAV_Y and not self._tap.pending:
+            di = self._klist.index_at(y - LIST_Y)
             if 0 <= di < len(self._items):
-                self.app.mpd.play_pos(self._items[di].pos)
-                self.app.request_poll()
+                pos = self._items[di].pos
+                self._tap.set(lambda: (self.app.mpd.play_pos(pos),
+                                       self.app.request_poll()))
         return None
 
+    def handle_long_press(self, x: int, y: int) -> bool:
+        if not (LIST_Y <= y < NAV_Y):
+            return False
+        di = self._klist.index_at(y - LIST_Y)
+        if not (0 <= di < len(self._items)):
+            return False
+        item = self._items[di]
+        from musi.player.screens.context_menu import ContextMenuScreen
+        self.app.push(ContextMenuScreen(self.app, item.title, [
+            ("Play",              lambda: self._menu_play(item.pos)),
+            ("Remove from queue", lambda: self._menu_remove(item.pos)),
+        ]))
+        return True
+
+    def _menu_play(self, pos: int) -> None:
+        self.app.mpd.play_pos(pos)
+        self.app.request_poll()
+
+    def _menu_remove(self, pos: int) -> None:
+        self.app.mpd.remove_pos(pos)
+        self.app.request_poll()
+        self._refresh()
+
     def handle_scroll(self, dy: float) -> None:
-        max_scroll = len(self._items) - MAX_VIS
-        if max_scroll <= 0:
-            return
-        self._scroll_px += -dy
-        while self._scroll_px >= ITEM_H and self._scroll < max_scroll:
-            self._scroll_px -= ITEM_H
-            self._scroll += 1
-        while self._scroll_px <= -ITEM_H and self._scroll > 0:
-            self._scroll_px += ITEM_H
-            self._scroll -= 1
-        if (self._scroll == 0 and self._scroll_px < 0) or \
-           (self._scroll >= max_scroll and self._scroll_px > 0):
-            self._scroll_px = 0
+        self._klist.scroll_by(dy)
+
+    def handle_scroll_start(self) -> None:
+        self._klist.start_touch()
+
+    def handle_scroll_end(self) -> None:
+        self._klist.end_touch()
 
     # drag the handle to reorder
     def on_press(self, x: int, y: int) -> bool:
         if x < HANDLE_ZONE or not (LIST_Y <= y < NAV_Y):
             return False
-        di = (y - LIST_Y) // ITEM_H + self._scroll
+        di = self._klist.index_at(y - LIST_Y)
         if 0 <= di < len(self._items):
             self._drag_idx  = di
             self._drag_orig = self._items[di].pos
@@ -149,7 +173,8 @@ class QueueScreen(Screen):
         if self._drag_idx is None:
             return
         self._drag_y = y
-        target = max(0, min(len(self._items) - 1, (y - LIST_Y) // ITEM_H + self._scroll))
+        target = max(0, min(len(self._items) - 1,
+                            self._klist.index_at(y - LIST_Y)))
         if target != self._drag_idx:
             it = self._items.pop(self._drag_idx)
             self._items.insert(target, it)
@@ -173,10 +198,3 @@ def _play_tri(surface, cx, cy, col):
 def _handle(surface, cx, cy, col):
     for dy in (-5, 0, 5):
         pygame.draw.line(surface, col, (cx - 7, cy + dy), (cx + 7, cy + dy), 2)
-
-
-def _scrollbar(surface, x, y, h, total, scroll, vis):
-    pygame.draw.rect(surface, (30, 30, 44), (x, y, 2, h), border_radius=1)
-    thumb_h = max(16, int(h * vis / total))
-    thumb_y = y + int((h - thumb_h) * scroll / max(1, total - vis))
-    pygame.draw.rect(surface, theme.DIM, (x, thumb_y, 2, thumb_h), border_radius=1)

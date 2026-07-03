@@ -10,6 +10,7 @@ from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
+from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
 
 ITEM_H  = 52          # height of each list row
 LIST_Y  = 62          # top of the list (below statusbar + breadcrumb)
@@ -37,8 +38,8 @@ class BrowseScreen(Screen):
         self._album_name:  str         = ""
         self._items:       list[_Item] = []
         self._sel:         int         = 0
-        self._scroll:      int         = 0
-        self._scroll_px:   float       = 0.0   # accumulated drag for swipe-scroll
+        self._klist = KineticList(ITEM_H, NAV_Y - LIST_Y)
+        self._tap   = PendingTap()
 
         # tiny album-art cache: art_path → 36×36 Surface (or None)
         self._art_cache: dict[str, pygame.Surface | None] = {}
@@ -79,17 +80,22 @@ class BrowseScreen(Screen):
             back_s = theme.render("‹ back", 10, theme.DIM)
             surface.blit(back_s, (320 - back_s.get_width() - 8, 30))
 
-        # ── list ──────────────────────────────────────────────────────────────
-        for vi in range(MAX_VIS):
-            di = vi + self._scroll
+        # ── list (pixel-smooth with momentum) ─────────────────────────────────
+        self._klist.update()
+        self._tap.update()
+        first = self._klist.first_visible()
+        shift = self._klist.pixel_shift()
+        clip  = surface.get_clip()
+        surface.set_clip(pygame.Rect(0, LIST_Y, 320, NAV_Y - LIST_Y))
+        for vi in range(self._klist.visible_rows()):
+            di = first + vi
             if di >= len(self._items):
                 break
-            self._draw_item(surface, vi, di)
+            self._draw_item(surface, LIST_Y + vi * ITEM_H - shift, di)
+        surface.set_clip(clip)
 
         # ── scrollbar ─────────────────────────────────────────────────────────
-        if len(self._items) > MAX_VIS:
-            _scrollbar(surface, 315, LIST_Y, NAV_Y - LIST_Y,
-                       len(self._items), self._scroll, MAX_VIS)
+        draw_scrollbar(surface, 315, LIST_Y, NAV_Y - LIST_Y, self._klist)
 
         # ── empty state ───────────────────────────────────────────────────────
         if not self._items:
@@ -99,9 +105,8 @@ class BrowseScreen(Screen):
         # ── nav ───────────────────────────────────────────────────────────────
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
 
-    def _draw_item(self, surface: pygame.Surface, vi: int, di: int) -> None:
+    def _draw_item(self, surface: pygame.Surface, y: int, di: int) -> None:
         item = self._items[di]
-        y    = LIST_Y + vi * ITEM_H
         sel  = (di == self._sel)
         rect = pygame.Rect(10, y, 298, ITEM_H - 3)
 
@@ -161,33 +166,39 @@ class BrowseScreen(Screen):
     # ── input ─────────────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
-        if LIST_Y <= y < NAV_Y - 24:
-            vi = (y - LIST_Y) // ITEM_H
-            di = vi + self._scroll
+        if LIST_Y <= y < NAV_Y - 24 and not self._tap.pending:
+            di = self._klist.index_at(y - LIST_Y)
             if 0 <= di < len(self._items):
-                self._sel = di
-                self._clamp_scroll()
-                self._select()
+                self._sel = di                    # highlight flashes, then opens
+                self._tap.set(self._select)
                 return None
         # "‹ back" hint in top-right header area
         if y < 58 and x > 200 and self._level > 0:
             return Button.BACK
         return super().handle_touch(x, y)
 
+    def handle_long_press(self, x: int, y: int) -> bool:
+        if self._level == 0 or not (LIST_Y <= y < NAV_Y - 24):
+            return False
+        di = self._klist.index_at(y - LIST_Y)
+        if not (0 <= di < len(self._items)):
+            return False
+        self._sel = di
+        item = self._items[di]
+        if self._level == 2:
+            self._open_track_menu(item)
+        else:
+            self._open_album_menu(item)
+        return True
+
     def handle_scroll(self, dy: float) -> None:
-        max_scroll = len(self._items) - MAX_VIS
-        if max_scroll <= 0:
-            return
-        self._scroll_px += -dy
-        while self._scroll_px >= ITEM_H and self._scroll < max_scroll:
-            self._scroll_px -= ITEM_H
-            self._scroll += 1
-        while self._scroll_px <= -ITEM_H and self._scroll > 0:
-            self._scroll_px += ITEM_H
-            self._scroll -= 1
-        if (self._scroll == 0 and self._scroll_px < 0) or \
-           (self._scroll >= max_scroll and self._scroll_px > 0):
-            self._scroll_px = 0
+        self._klist.scroll_by(dy)
+
+    def handle_scroll_start(self) -> None:
+        self._klist.start_touch()
+
+    def handle_scroll_end(self) -> None:
+        self._klist.end_touch()
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.UP:
@@ -216,14 +227,12 @@ class BrowseScreen(Screen):
             self._artist_name = item.label
             self._level       = 1
             self._sel         = 0
-            self._scroll      = 0
             self._load_albums(item.row_id)
         elif self._level == 1:
             self._album_id   = item.row_id
             self._album_name = item.label
             self._level      = 2
             self._sel        = 0
-            self._scroll     = 0
             self._load_tracks(item.row_id)
         elif self._level == 2:
             self._play_from(self._sel)
@@ -232,14 +241,12 @@ class BrowseScreen(Screen):
         if self._level == 0:
             self.app.pop()
         elif self._level == 1:
-            self._level  = 0
-            self._sel    = 0
-            self._scroll = 0
+            self._level = 0
+            self._sel   = 0
             self._load_artists()
         elif self._level == 2:
-            self._level  = 1
-            self._sel    = 0
-            self._scroll = 0
+            self._level = 1
+            self._sel   = 0
             self._load_albums(self._artist_id)
 
     def _play_from(self, idx: int) -> None:
@@ -249,6 +256,49 @@ class BrowseScreen(Screen):
         from musi.player.screens.now_playing import NowPlayingScreen
         self.app.push(NowPlayingScreen(self.app))
 
+    # ── long-press menus ──────────────────────────────────────────────────────
+
+    def _open_track_menu(self, item: _Item) -> None:
+        from musi.player.screens.context_menu import ContextMenuScreen
+        idx = self._sel
+        self.app.push(ContextMenuScreen(self.app, item.label, [
+            ("Play now",     lambda: self._play_from(idx)),
+            ("Play next",    lambda: self._queue([item.path], next_up=True)),
+            ("Add to queue", lambda: self._queue([item.path], next_up=False)),
+        ]))
+
+    def _open_album_menu(self, item: _Item) -> None:
+        from musi.player.screens.context_menu import ContextMenuScreen
+        paths = self._album_paths(item.row_id)
+        if not paths:
+            return
+        self.app.push(ContextMenuScreen(self.app, item.label, [
+            ("Play album",   lambda: self._play_album(paths)),
+            ("Play next",    lambda: self._queue(paths, next_up=True)),
+            ("Add to queue", lambda: self._queue(paths, next_up=False)),
+        ]))
+
+    def _album_paths(self, album_id: int) -> list[str]:
+        rows = self.app.db.execute(
+            """SELECT path FROM tracks WHERE album_id = ?
+               ORDER BY disc_number, track_number""",
+            (album_id,),
+        ).fetchall()
+        return [r["path"] for r in rows]
+
+    def _play_album(self, paths: list[str]) -> None:
+        self.app.mpd.play_paths(paths)
+        self.app.request_poll()
+        from musi.player.screens.now_playing import NowPlayingScreen
+        self.app.push(NowPlayingScreen(self.app))
+
+    def _queue(self, paths: list[str], next_up: bool) -> None:
+        if next_up:
+            self.app.mpd.queue_next(paths)
+        else:
+            self.app.mpd.queue_add(paths)
+        self.app.request_poll()
+
     # ── data loading ──────────────────────────────────────────────────────────
 
     def _load_artists(self) -> None:
@@ -256,6 +306,7 @@ class BrowseScreen(Screen):
             "SELECT id, name FROM artists ORDER BY name COLLATE NOCASE"
         ).fetchall()
         self._items = [_Item(label=r["name"], row_id=r["id"]) for r in rows]
+        self._klist.set_count(len(self._items), reset=True)
 
     def _load_albums(self, artist_id: int) -> None:
         rows = self.app.db.execute(
@@ -274,6 +325,7 @@ class BrowseScreen(Screen):
             )
             for r in rows
         ]
+        self._klist.set_count(len(self._items), reset=True)
 
     def _load_tracks(self, album_id: int) -> None:
         rows = self.app.db.execute(
@@ -291,6 +343,7 @@ class BrowseScreen(Screen):
             )
             for r in rows
         ]
+        self._klist.set_count(len(self._items), reset=True)
 
     def _get_art(self, art_path: str) -> pygame.Surface | None:
         if art_path in self._art_cache:
@@ -308,10 +361,7 @@ class BrowseScreen(Screen):
 
 
     def _clamp_scroll(self) -> None:
-        if self._sel < self._scroll:
-            self._scroll = self._sel
-        elif self._sel >= self._scroll + MAX_VIS:
-            self._scroll = self._sel - MAX_VIS + 1
+        self._klist.ensure_visible(self._sel)
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────────
@@ -324,15 +374,3 @@ def _chevron(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
 def _play_icon(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
     pts = [(cx - 5, cy - 6), (cx - 5, cy + 6), (cx + 6, cy)]
     pygame.draw.polygon(surface, col, pts)
-
-
-def _scrollbar(
-    surface: pygame.Surface,
-    x: int, y: int, h: int,
-    total: int, scroll: int, vis: int,
-) -> None:
-    """Thin scrollbar on the right edge."""
-    pygame.draw.rect(surface, (30, 30, 44), (x, y, 2, h), border_radius=1)
-    thumb_h = max(16, int(h * vis / total))
-    thumb_y = y + int((h - thumb_h) * scroll / max(1, total - vis))
-    pygame.draw.rect(surface, theme.DIM, (x, thumb_y, 2, thumb_h), border_radius=1)

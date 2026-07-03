@@ -12,6 +12,7 @@ from musi.player.input import Button
 from musi.player.keyboard import Keyboard
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
+from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
 
 # ── layout constants ──────────────────────────────────────────────────────────
 BAR_H   = 26          # status bar height (matches statusbar.BAR_H)
@@ -41,10 +42,10 @@ class SearchScreen(Screen):
         self._query:   str           = ""
         self._results: list[_Result] = []
         self._sel:     int           = 0
-        self._scroll:  int           = 0
-        self._scroll_px: float       = 0.0   # accumulated drag for swipe-scroll
         self._enter_t: float         = 0.0
-        self._kb = Keyboard(KB_TOP)
+        self._kb    = Keyboard(KB_TOP)
+        self._klist = KineticList(ITEM_H, KB_TOP - LIST_Y)
+        self._tap   = PendingTap()
 
         # static surfaces (lazy)
         self._nav_surf: pygame.Surface | None = None
@@ -56,7 +57,7 @@ class SearchScreen(Screen):
         self._query   = ""
         self._results = []
         self._sel     = 0
-        self._scroll  = 0
+        self._klist.set_count(0, reset=True)
         self._enter_t = time.monotonic()
 
     # ── raw event (keyboard typing) ───────────────────────────────────────────
@@ -84,13 +85,35 @@ class SearchScreen(Screen):
         if y >= KB_TOP:                       # tap on the on-screen keyboard
             self._on_key(self._kb.key_at(x, y))
             return None
-        if LIST_Y <= y < KB_TOP:              # tap a result
-            di = (y - LIST_Y) // ITEM_H + self._scroll
+        if LIST_Y <= y < KB_TOP and not self._tap.pending:   # tap a result
+            di = self._klist.index_at(y - LIST_Y)
             if 0 <= di < len(self._results):
-                self._sel = di
-                self._clamp_scroll()
-                self._play_selected()
+                self._sel = di                # highlight flashes, then plays
+                self._tap.set(self._play_selected)
         return None
+
+    def handle_long_press(self, x: int, y: int) -> bool:
+        if not (LIST_Y <= y < KB_TOP):
+            return False
+        di = self._klist.index_at(y - LIST_Y)
+        if not (0 <= di < len(self._results)):
+            return False
+        self._sel = di
+        res = self._results[di]
+        from musi.player.screens.context_menu import ContextMenuScreen
+        self.app.push(ContextMenuScreen(self.app, res.title, [
+            ("Play now",     self._play_selected),
+            ("Play next",    lambda: self._queue(res.path, next_up=True)),
+            ("Add to queue", lambda: self._queue(res.path, next_up=False)),
+        ]))
+        return True
+
+    def _queue(self, path: str, next_up: bool) -> None:
+        if next_up:
+            self.app.mpd.queue_next([path])
+        else:
+            self.app.mpd.queue_add([path])
+        self.app.request_poll()
 
     def _on_key(self, key: "str | None") -> None:
         if key is None:
@@ -108,19 +131,13 @@ class SearchScreen(Screen):
         self._search()
 
     def handle_scroll(self, dy: float) -> None:
-        max_scroll = len(self._results) - MAX_VIS
-        if max_scroll <= 0:
-            return
-        self._scroll_px += -dy
-        while self._scroll_px >= ITEM_H and self._scroll < max_scroll:
-            self._scroll_px -= ITEM_H
-            self._scroll += 1
-        while self._scroll_px <= -ITEM_H and self._scroll > 0:
-            self._scroll_px += ITEM_H
-            self._scroll -= 1
-        if (self._scroll == 0 and self._scroll_px < 0) or \
-           (self._scroll >= max_scroll and self._scroll_px > 0):
-            self._scroll_px = 0
+        self._klist.scroll_by(dy)
+
+    def handle_scroll_start(self) -> None:
+        self._klist.start_touch()
+
+    def handle_scroll_end(self) -> None:
+        self._klist.end_touch()
 
     # ── button input ─────────────────────────────────────────────────────────
 
@@ -140,7 +157,7 @@ class SearchScreen(Screen):
                 self._query   = ""
                 self._results = []
                 self._sel     = 0
-                self._scroll  = 0
+                self._klist.set_count(0, reset=True)
             else:
                 self.app.pop()
 
@@ -185,15 +202,20 @@ class SearchScreen(Screen):
                                 11, theme.DIM, max_width=290)
             surface.blit(hint, hint.get_rect(centerx=160, y=240))
         else:
-            for vi in range(MAX_VIS):
-                di = vi + self._scroll
+            self._klist.update()
+            self._tap.update()
+            first = self._klist.first_visible()
+            shift = self._klist.pixel_shift()
+            clip  = surface.get_clip()
+            surface.set_clip(pygame.Rect(0, LIST_Y, 320, KB_TOP - LIST_Y))
+            for vi in range(self._klist.visible_rows()):
+                di = first + vi
                 if di >= len(self._results):
                     break
-                self._draw_result(surface, vi, di)
+                self._draw_result(surface, LIST_Y + vi * ITEM_H - shift, di)
+            surface.set_clip(clip)
 
-            if len(self._results) > MAX_VIS:
-                _scrollbar(surface, 314, LIST_Y, KB_TOP - LIST_Y,
-                           len(self._results), self._scroll, MAX_VIS)
+            draw_scrollbar(surface, 314, LIST_Y, KB_TOP - LIST_Y, self._klist)
 
         # ── result count (top-right of box) ───────────────────────────────────
         if self._results:
@@ -205,9 +227,8 @@ class SearchScreen(Screen):
         # ── on-screen keyboard ─────────────────────────────────────────────────
         self._kb.draw(surface)
 
-    def _draw_result(self, surface: pygame.Surface, vi: int, di: int) -> None:
+    def _draw_result(self, surface: pygame.Surface, y: int, di: int) -> None:
         res  = self._results[di]
-        y    = LIST_Y + vi * ITEM_H
         sel  = (di == self._sel)
         rect = pygame.Rect(8, y, 304, ITEM_H - 3)
 
@@ -243,11 +264,11 @@ class SearchScreen(Screen):
     # ── search logic ─────────────────────────────────────────────────────────
 
     def _search(self) -> None:
-        self._sel    = 0
-        self._scroll = 0
+        self._sel = 0
         q = self._query.strip()
         if not q:
             self._results = []
+            self._klist.set_count(0, reset=True)
             return
 
         # FTS5 prefix-match: each word becomes "word"*
@@ -280,6 +301,7 @@ class SearchScreen(Screen):
             )
             for r in rows
         ]
+        self._klist.set_count(len(self._results), reset=True)
 
     # ── playback ─────────────────────────────────────────────────────────────
 
@@ -295,10 +317,7 @@ class SearchScreen(Screen):
     # ── scroll ────────────────────────────────────────────────────────────────
 
     def _clamp_scroll(self) -> None:
-        if self._sel < self._scroll:
-            self._scroll = self._sel
-        elif self._sel >= self._scroll + MAX_VIS:
-            self._scroll = self._sel - MAX_VIS + 1
+        self._klist.ensure_visible(self._sel)
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────────
@@ -311,14 +330,3 @@ def _magnifier(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
 def _play_icon(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
     pts = [(cx - 5, cy - 6), (cx - 5, cy + 6), (cx + 6, cy)]
     pygame.draw.polygon(surface, col, pts)
-
-
-def _scrollbar(
-    surface: pygame.Surface,
-    x: int, y: int, h: int,
-    total: int, scroll: int, vis: int,
-) -> None:
-    pygame.draw.rect(surface, (30, 30, 44), (x, y, 2, h), border_radius=1)
-    thumb_h = max(16, int(h * vis / total))
-    thumb_y = y + int((h - thumb_h) * scroll / max(1, total - vis))
-    pygame.draw.rect(surface, theme.DIM, (x, thumb_y, 2, thumb_h), border_radius=1)

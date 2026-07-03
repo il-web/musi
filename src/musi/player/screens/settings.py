@@ -7,6 +7,7 @@ from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
+from musi.player.widgets import PendingTap
 
 MENU   = ["Bluetooth", "WiFi", "Updates", "Power"]
 ITEM_H = 80          # card height
@@ -29,6 +30,7 @@ class SettingsScreen(Screen):
     def __init__(self, app) -> None:
         super().__init__(app)
         self._sel = 0
+        self._tap = PendingTap()
         self._header_surf: pygame.Surface | None = None
         self._nav_surf:    pygame.Surface | None = None
         self._menu_surfs:  list[pygame.Surface]  = []
@@ -43,6 +45,7 @@ class SettingsScreen(Screen):
 
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
+        self._tap.update()
 
         # section header
         surface.blit(self._header_surf, (14, 26))
@@ -69,11 +72,11 @@ class SettingsScreen(Screen):
     # ── input ─────────────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
-        if _TOP <= y < _BOTTOM:
+        if _TOP <= y < _BOTTOM and not self._tap.pending:
             i = (y - _TOP) // _SLOT
             if 0 <= i < len(MENU):
                 self._sel = i
-                self._open()
+                self._tap.set(self._open)
                 return None
         return super().handle_touch(x, y)
 

@@ -255,6 +255,31 @@ class MusiMPDClient:
         """Jump to and play the track at queue position ``pos``."""
         self._cmd(lambda: self._client.play(pos))
 
+    def queue_next(self, paths: list[Path | str]) -> None:
+        """Insert tracks right after the currently playing one."""
+        if not self._ensure():
+            return
+        try:
+            pos = int(self._client.status().get("song", -1)) + 1
+            for i, p in enumerate(paths):
+                self._client.addid(self._to_relative(Path(p)), pos + i)
+        except Exception:
+            self._connected = False
+
+    def queue_add(self, paths: list[Path | str]) -> None:
+        """Append tracks to the end of the queue."""
+        if not self._ensure():
+            return
+        try:
+            for p in paths:
+                self._client.add(self._to_relative(Path(p)))
+        except Exception:
+            self._connected = False
+
+    def remove_pos(self, pos: int) -> None:
+        """Remove the track at queue position ``pos``."""
+        self._cmd(lambda: self._client.delete(pos))
+
     def move(self, from_pos: int, to_pos: int) -> None:
         """Reorder: move a queued track from one position to another."""
         if from_pos == to_pos:
