@@ -9,7 +9,7 @@ import threading
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme, updater
+from musi.player import audio_detect, hardening, statusbar, theme, updater
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -26,6 +26,7 @@ class UpdatesScreen(Screen):
     def __init__(self, app) -> None:
         super().__init__(app)
         self._status: updater.UpdateStatus | None = None
+        self._locked: bool = False   # storage lock — git pull wouldn't survive reboot
         self._busy:   bool = False
         self._msg:    str  = ""
         self._hdr:    pygame.Surface | None = None
@@ -37,6 +38,7 @@ class UpdatesScreen(Screen):
         self._prog_label: str   = ""
 
     def on_enter(self) -> None:
+        self._locked = hardening.overlay_active()
         self._status = updater.UpdateStatus(current=updater.current_version())
         self._check()
 
@@ -57,6 +59,9 @@ class UpdatesScreen(Screen):
 
     def _update(self) -> None:
         if self._busy or not (self._status and self._status.available):
+            return
+        if self._locked:
+            self._msg = "Storage locked — unlock in Settings → Power"
             return
         self._busy = True
         self._updating   = True
@@ -119,11 +124,15 @@ class UpdatesScreen(Screen):
 
         # buttons
         self._button(surface, CHECK_RECT, "Check", enabled=not self._busy)
-        can_update = bool(st and st.available) and not self._busy
+        can_update = bool(st and st.available) and not self._busy and not self._locked
         self._button(surface, UPDATE_RECT, "Update now", enabled=can_update, accent=can_update)
 
         if self._msg and not self._updating:
             m = theme.render(self._msg, 12, theme.WHITE, max_width=300)
+            surface.blit(m, m.get_rect(centerx=160, y=458))
+        elif self._locked and not self._updating:
+            m = theme.render("Storage locked — unlock in Settings → Power to update",
+                             11, theme.DIM, max_width=300)
             surface.blit(m, m.get_rect(centerx=160, y=458))
 
         # progress popup (modal) — drawn last, over everything

@@ -170,7 +170,7 @@ say "[9c] Power-off / reboot permission"
 # Sudoers rules must be a single line; a malformed sudoers.d file makes every
 # sudo call print parse errors. Validate with visudo before installing.
 TMP_SUDOERS="$(mktemp)"
-printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i, /usr/bin/nmcli *\n' \
+printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i, /usr/bin/nmcli *, /usr/sbin/iw *, /usr/bin/raspi-config nonint do_overlayfs *\n' \
     "$USER_NAME" > "$TMP_SUDOERS"
 if sudo visudo -c -f "$TMP_SUDOERS" > /dev/null; then
     sudo install -m 0440 -o root -g root "$TMP_SUDOERS" /etc/sudoers.d/musi-power
@@ -179,6 +179,48 @@ else
     sudo rm -f /etc/sudoers.d/musi-power
 fi
 rm -f "$TMP_SUDOERS"
+
+# ── 9d. OS hardening (SD-card protection + battery) ──────────────────────────
+say "[9d] OS hardening"
+# No swap: a swapfile is pure SD wear on a 512MB Zero W and useless for this app.
+sudo systemctl disable --now dphys-swapfile 2>/dev/null || true
+sudo dphys-swapfile swapoff 2>/dev/null || true
+sudo dphys-swapfile uninstall 2>/dev/null || true
+
+# Journal in RAM only — logs don't survive reboot, but nothing writes the card.
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo tee /etc/systemd/journald.conf.d/musi.conf > /dev/null <<'EOF'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=16M
+EOF
+sudo systemctl restart systemd-journald 2>/dev/null || true
+
+# /tmp in RAM.
+if ! grep -qE '^\s*tmpfs\s+/tmp\s' /etc/fstab; then
+    echo 'tmpfs /tmp tmpfs mode=1777,nosuid,nodev,size=64m 0 0' | sudo tee -a /etc/fstab > /dev/null
+fi
+
+# Faster boot: skip the firmware's 1s pause and the rainbow GPU splash.
+BOOT_CFG=/boot/firmware/config.txt
+[ -f "$BOOT_CFG" ] || BOOT_CFG=/boot/config.txt
+for kv in boot_delay=0 disable_splash=1; do
+    grep -q "^${kv%%=*}=" "$BOOT_CFG" || echo "$kv" | sudo tee -a "$BOOT_CFG" > /dev/null
+done
+
+# Wi-Fi power save on by default (the app turns it off while WiFi Transfer is
+# open — power save adds latency that slows uploads).
+sudo mkdir -p /etc/NetworkManager/conf.d
+sudo tee /etc/NetworkManager/conf.d/musi-wifi-powersave.conf > /dev/null <<'EOF'
+[connection]
+# 3 = enable, 2 = disable
+wifi.powersave = 3
+EOF
+sudo systemctl reload NetworkManager 2>/dev/null || true
+
+# NOTE: the storage lock (read-only overlay root) is NOT enabled here — it is
+# toggled from Settings -> Power on the device (raspi-config nonint
+# do_overlayfs, allowed via the sudoers rule above) and applies after reboot.
 
 # ── 10. services + autostart ──────────────────────────────────────────────────
 say "[10/10] Enabling services + autostart"

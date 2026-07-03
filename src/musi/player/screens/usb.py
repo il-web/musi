@@ -6,7 +6,7 @@ import time
 
 import pygame
 
-from musi.player import audio_detect, statusbar, theme
+from musi.player import audio_detect, hardening, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -33,6 +33,7 @@ class USBScreen(Screen):   # keep class name so home.py import still works
         self._server:   WifiTransferServer | None = None
         self._ip:       str   = ""
         self._error:    str   = ""
+        self._locked:   bool  = False
         self._enter_t:  float = 0.0
 
         # static surfaces (lazy)
@@ -45,6 +46,15 @@ class USBScreen(Screen):   # keep class name so home.py import still works
         self._enter_t = time.monotonic()
         self._error   = ""
         self._ip      = _local_ip()
+
+        # Storage locked → uploads would only land in the RAM overlay (and can
+        # fill it); refuse to start the server and point at the unlock.
+        self._locked = hardening.overlay_active()
+        if self._locked:
+            self._server = None
+            return
+
+        hardening.wifi_powersave(False)   # full-speed uploads while we're open
 
         from musi.library.config import art_dir, db_path, music_root
         try:
@@ -65,6 +75,8 @@ class USBScreen(Screen):   # keep class name so home.py import still works
         if self._server:
             self._server.stop()
             self._server = None
+        if not self._locked:
+            hardening.wifi_powersave(True)   # back to the battery-friendly default
 
     # ── input ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +93,9 @@ class USBScreen(Screen):   # keep class name so home.py import still works
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
 
-        if self._error:
+        if self._locked:
+            self._draw_locked(surface)
+        elif self._error:
             self._draw_error(surface)
         else:
             self._draw_running(surface)
@@ -133,6 +147,18 @@ class USBScreen(Screen):   # keep class name so home.py import still works
         pygame.draw.circle(surface, dot_c, (20, 194), 4)
         live_s = theme.render("server running", 9, theme.DIM)
         surface.blit(live_s, (28, 190))
+
+    def _draw_locked(self, surface: pygame.Surface) -> None:
+        _wifi_icon(surface, 160, 148, theme.DIM)
+        title = theme.render("Storage is locked", 16, theme.WHITE, bold=True)
+        surface.blit(title, title.get_rect(centerx=160, y=196))
+        for i, line in enumerate((
+            "Uploads can't be saved while the SD card",
+            "is read-only. Unlock in Settings → Power,",
+            "then reboot and try again.",
+        )):
+            s = theme.render(line, 11, theme.DIM)
+            surface.blit(s, s.get_rect(centerx=160, y=232 + i * 18))
 
     def _draw_error(self, surface: pygame.Surface) -> None:
         _wifi_icon(surface, 160, 186, theme.DIM)

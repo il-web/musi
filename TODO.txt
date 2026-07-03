@@ -25,16 +25,20 @@ DONE
     - Long-press menus: track -> Play now / Play next / Add to queue;
       album -> Play album / next / add; queue row -> Play / Remove
     - mpd_client: queue_next / queue_add / remove_pos
+[x] OS hardening pack
+    - Storage lock = overlay root, toggled from Settings -> Power (default
+      OFF; raspi-config nonint do_overlayfs via sudoers; applies on reboot).
+      NOTE: the whole rootfs is volatile while locked — no way to keep
+      ~/music writable on one partition — so Updates + WiFi Transfer detect
+      the lock (hardening.overlay_active) and refuse with an unlock hint.
+      Flip it ON before power-circuit experiments, OFF for daily use.
+    - install.sh 9d: swap off (dphys-swapfile), journald Storage=volatile,
+      /tmp on tmpfs, boot_delay=0 + disable_splash=1, NM wifi.powersave=3
+    - WiFi power save on by default; off while WiFi Transfer screen is open
+      (hardening.wifi_powersave via sudo iw)
 
 NEXT PACKS (pick one)
 ---------------------
-[ ] OS hardening
-    - Overlay filesystem / read-only root (raspi-config) so hard power cuts
-      can't corrupt the SD card; keep ~/.local/share/musi + music writable
-    - Disable swap (dphys-swapfile), journald Storage=volatile
-    - Wi-Fi power save on by default; off while WiFi Transfer screen is open
-    - Boot time: systemd-analyze blame; boot_delay=0, disable_splash=1
-
 [ ] Features
     - "Recently played" row on Home (play_history table is already populated,
       nothing reads it); "Most played" is the same query with GROUP BY
@@ -72,7 +76,8 @@ NEXT PACKS (pick one)
     - Software: GPIO17 listener thread in the app (gpiozero/libgpiod, guarded
       import so dev machines no-op); reuse backlight.set_on + screen-off state
     - Enclosure: only a button hole needed (no slide-switch cutout)
-    - Do the OS hardening pack first anyway (general hard-cut insurance)
+    - OS hardening pack is DONE — flip Storage lock ON (Settings -> Power)
+      before wiring/power experiments
 
 PI MAINTENANCE NOTES
 --------------------
@@ -80,5 +85,10 @@ PI MAINTENANCE NOTES
   it does NOT run install.sh. After packs that change install.sh, run once:
       cd ~/musi && bash install.sh     (idempotent)
 - Already applied on the Pi: backlight udev rule, sudoers with nmcli.
+- OS hardening pack changed install.sh (9c sudoers + new 9d) — run it once
+  on the Pi after updating, or Storage lock / iw powersave will get
+  "sudo: a password is required".
+- Storage lock lives in Settings -> Power; while ON, Updates and WiFi
+  Transfer are blocked by design. Unlock + reboot to update or add music.
 - Screen timeouts tunable via MUSI_DIM_S / MUSI_OFF_S env (0 disables).
 - pi/musi.service is stale (installer uses musi-ui.service) — delete someday.
