@@ -58,6 +58,7 @@ class App:
         self._poll_time:       float        = 0.0   # when _status was fetched
         self._running:         bool         = False
         self._last_track_path: str | None   = None
+        self._sleep_at:        float | None = None   # sleep timer deadline (ticks s)
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -102,6 +103,19 @@ class App:
             new_state = "pause" if self._status.state == "play" else "play"
             self._status = replace(self._status, state=new_state)
         self.request_poll()
+
+    def set_sleep_timer(self, minutes: float | None) -> None:
+        """Pause playback after `minutes`; None cancels the timer."""
+        if minutes is None:
+            self._sleep_at = None
+        else:
+            self._sleep_at = pygame.time.get_ticks() / 1000.0 + minutes * 60
+
+    def sleep_remaining(self) -> float | None:
+        """Seconds until the sleep timer fires, or None if not set."""
+        if self._sleep_at is None:
+            return None
+        return max(0.0, self._sleep_at - pygame.time.get_ticks() / 1000.0)
 
     # ── bluetooth switch overlay ────────────────────────────────────────────────
 
@@ -183,6 +197,13 @@ class App:
                 self._last_poll = now
                 self._poll_time = now
                 self._maybe_record_play()
+
+            # ── sleep timer ───────────────────────────────────────────────────
+            if self._sleep_at is not None and now >= self._sleep_at:
+                self._sleep_at = None
+                if self._status.state == "play":
+                    self._mpd.pause()
+                    self.request_poll()
 
             # ── events ────────────────────────────────────────────────────────
             for event in pygame.event.get():

@@ -9,8 +9,8 @@ from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import PendingTap
 
-MENU   = ["Bluetooth", "WiFi", "Updates", "Power"]
-ITEM_H = 80          # card height
+MENU   = ["Bluetooth", "WiFi", "Sleep Timer", "Updates", "Power"]
+ITEM_H = 70          # card height
 NAV_Y  = 456
 
 # Distribute the menu items evenly between the header and the nav hint so the
@@ -67,6 +67,15 @@ class SettingsScreen(Screen):
                 surface.blit(dim, (60, y + (ITEM_H - dim.get_height()) // 2 - 2))
                 icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, theme.CARD_BG)
 
+            # live countdown on the Sleep Timer row
+            if MENU[i] == "Sleep Timer":
+                rem = self.app.sleep_remaining()
+                if rem is not None:
+                    rem_s = theme.render(f"{int(rem // 60) + 1} min", 12,
+                                         theme.WHITE if i == self._sel else theme.DIM)
+                    surface.blit(rem_s, (294 - rem_s.get_width(),
+                                         y + (ITEM_H - rem_s.get_height()) // 2 - 2))
+
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
 
     # ── input ─────────────────────────────────────────────────────────────────
@@ -98,11 +107,27 @@ class SettingsScreen(Screen):
             from musi.player.screens.wifi import WifiScreen
             self.app.push(WifiScreen(self.app))
         elif self._sel == 2:
+            self._open_sleep_menu()
+        elif self._sel == 3:
             from musi.player.screens.updates import UpdatesScreen
             self.app.push(UpdatesScreen(self.app))
-        elif self._sel == 3:
+        elif self._sel == 4:
             from musi.player.screens.power import PowerScreen
             self.app.push(PowerScreen(self.app))
+
+    def _open_sleep_menu(self) -> None:
+        from musi.player.screens.context_menu import ContextMenuScreen
+
+        def set_timer(minutes):
+            return lambda: self.app.set_sleep_timer(minutes)
+
+        self.app.push(ContextMenuScreen(self.app, "Sleep timer — pause after", [
+            ("Off",        set_timer(None)),
+            ("15 minutes", set_timer(15)),
+            ("30 minutes", set_timer(30)),
+            ("60 minutes", set_timer(60)),
+            ("90 minutes", set_timer(90)),
+        ]))
 
 
 # ── icon helpers ──────────────────────────────────────────────────────────────
@@ -124,12 +149,18 @@ def _draw_icon(surface, index, cx, cy, col):
                         cy + 3 - int(r * math.sin(math.pi * (0.5 + 0.45 * t / 10))))
                        for t in range(-10, 11)]
                 pygame.draw.lines(surface, col, False, pts, 2)
-    elif index == 2:  # Updates — download arrow into a tray
+    elif index == 2:  # Sleep Timer — crescent moon
+        outer = [(cx + 8 * math.cos(math.radians(d)),
+                  cy + 8 * math.sin(math.radians(d))) for d in range(60, 301, 20)]
+        inner = [(cx + 4 + 6 * math.cos(math.radians(d)),
+                  cy + 6 * math.sin(math.radians(d))) for d in range(285, 74, -20)]
+        pygame.draw.polygon(surface, col, outer + inner)
+    elif index == 3:  # Updates — download arrow into a tray
         pygame.draw.line(surface, col, (cx, cy - 8), (cx, cy + 2), 2)
         pygame.draw.lines(surface, col, False,
                           [(cx - 4, cy - 2), (cx, cy + 2), (cx + 4, cy - 2)], 2)
         pygame.draw.line(surface, col, (cx - 6, cy + 6), (cx + 6, cy + 6), 2)
-    elif index == 3:  # Power — power symbol (circle with top gap + stem)
+    elif index == 4:  # Power — power symbol (circle with top gap + stem)
         pygame.draw.arc(surface, col, pygame.Rect(cx - 8, cy - 7, 16, 16),
                         2.6, 0.55, 2)
         pygame.draw.line(surface, col, (cx, cy - 9), (cx, cy - 1), 2)

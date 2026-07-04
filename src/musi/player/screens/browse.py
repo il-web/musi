@@ -1,6 +1,8 @@
 """Browse screen — Artists → Albums → Tracks hierarchical browser."""
 from __future__ import annotations
 
+import bisect
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,7 +16,24 @@ from musi.player.list_screen import ListScreen
 ITEM_H  = 52          # height of each list row
 LIST_Y  = 62          # top of the list (below statusbar + breadcrumb)
 NAV_Y   = 456
-MAX_VIS = (NAV_Y - LIST_Y) // ITEM_H    # rows that fit on screen (~7)
+
+# Albums level renders as a 2-column art grid instead of rows.
+GRID_H     = 185      # height of one grid row (two album cells)
+GRID_CELLS = ((10, 145), (165, 145))    # (x, w) of the two columns
+
+# A-Z fast-scroll rail on the artists list.
+RAIL_X       = 298    # touches right of this hit the rail
+RAIL_LETTERS = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _letter_key(name: str) -> str:
+    """Bucket an artist name for the A-Z rail; monotone in NOCASE sort order."""
+    c = name.lstrip()[:1].upper()
+    if "A" <= c <= "Z":
+        return c
+    if c and c < "A":
+        return "#"    # digits / punctuation sort before letters
+    return "~"        # non-latin names sort after Z
 
 
 @dataclass
@@ -37,6 +56,11 @@ class BrowseScreen(ListScreen):
         self._album_name:  str         = ""
         self._items:       list[_Item] = []
 
+        # A-Z rail state (artists level)
+        self._letter_keys: list[str] = []
+        self._rail_active = False
+        self._rail_letter = ""
+        self._rail_surfs: list[pygame.Surface] | None = None
 
         # static surfaces
         self._nav_surf: pygame.Surface | None = None
@@ -75,7 +99,13 @@ class BrowseScreen(ListScreen):
             surface.blit(back_s, (320 - back_s.get_width() - 8, 30))
 
         # ── list (pixel-smooth with momentum) ─────────────────────────────────
-        self.draw_list_viewport(surface, len(self._items))
+        # Albums level packs two items per grid row.
+        num_rows = (math.ceil(len(self._items) / 2) if self._level == 1
+                    else len(self._items))
+        self.draw_list_viewport(surface, num_rows)
+
+        if self._level == 0 and self._items:
+            self._draw_rail(surface)
 
         # ── empty state ───────────────────────────────────────────────────────
         if not self._items:
@@ -86,35 +116,26 @@ class BrowseScreen(ListScreen):
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
+        if self._level == 1:
+            # Albums — one grid row = two album cells
+            for col_i, (cx, cw) in enumerate(GRID_CELLS):
+                idx = di * 2 + col_i
+                if idx < len(self._items):
+                    self._draw_album_cell(surface, cx, y, cw, idx)
+            return
+
         item = self._items[di]
         sel  = (di == self._sel)
-        rect = pygame.Rect(10, y, 298, ITEM_H - 3)
+        # artists rows end short of the A-Z rail
+        row_w = 284 if self._level == 0 else 298
+        rect = pygame.Rect(10, y, row_w, ITEM_H - 3)
 
         pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
                          rect, border_radius=7)
 
         col = theme.WHITE
 
-        if self._level == 1:
-            # Albums — show art thumbnail on left
-            art = art_cache.load_art_thumbnail(item.art_path)
-            if art:
-                surface.blit(art, (16, y + 3))
-                tx = 68
-            else:
-                # placeholder rect
-                pygame.draw.rect(surface, (40, 40, 55),
-                                 (16, y + 3, 46, 46), border_radius=3)
-                tx = 68
-
-            # title + year
-            lbl_s = theme.render(item.label, 13, col, bold=sel, max_width=210)
-            surface.blit(lbl_s, (tx, y + 6))
-            if item.sub:
-                sub_s = theme.render(item.sub, 10, theme.WHITE if sel else theme.DIM)
-                surface.blit(sub_s, (tx, y + 26))
-
-        elif self._level == 2:
+        if self._level == 2:
             # Tracks — show track number badge
             bx, bcy = 16, y + (ITEM_H - 3) // 2
             pygame.draw.rect(surface, (50, 50, 68) if not sel else (80, 80, 110),
@@ -135,32 +156,125 @@ class BrowseScreen(ListScreen):
 
         else:
             # Artists — name only
-            lbl_s = theme.render(item.label, 13, col, bold=sel, max_width=266)
+            lbl_s = theme.render(item.label, 13, col, bold=sel, max_width=250)
             surface.blit(lbl_s,
                          (16, y + (ITEM_H - 3 - lbl_s.get_height()) // 2))
 
-        # chevron (artists + albums)
-        icons.draw_chevron_right(surface, 302, y + (ITEM_H - 3) // 2,
+        # chevron (artists)
+        icons.draw_chevron_right(surface, rect.right - 14, y + (ITEM_H - 3) // 2,
                                  theme.WHITE if sel else theme.DIM)
+
+    def _draw_album_cell(self, surface: pygame.Surface, x: int, y: int,
+                         w: int, idx: int) -> None:
+        item = self._items[idx]
+        sel  = (idx == self._sel)
+        rect = pygame.Rect(x, y, w, GRID_H - 6)
+        pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
+                         rect, border_radius=8)
+
+        art_size = w - 16
+        art = art_cache.load_art_thumbnail(item.art_path, art_size)
+        if art:
+            surface.blit(art, (x + 8, y + 8))
+        else:
+            pygame.draw.rect(surface, (40, 40, 55),
+                             (x + 8, y + 8, art_size, art_size), border_radius=4)
+
+        lbl_s = theme.render(item.label, 12, theme.WHITE, bold=sel,
+                             max_width=art_size)
+        surface.blit(lbl_s, (x + 8, y + art_size + 12))
+        if item.sub:
+            sub_s = theme.render(item.sub, 10,
+                                 theme.WHITE if sel else theme.DIM)
+            surface.blit(sub_s, (x + 8, y + art_size + 29))
+
+    # ── A-Z fast-scroll rail (artists) ────────────────────────────────────────
+
+    def _draw_rail(self, surface: pygame.Surface) -> None:
+        if self._rail_surfs is None:
+            self._rail_surfs = [theme.render(c, 9, theme.DIM)
+                                for c in RAIL_LETTERS]
+        span = (NAV_Y - 24) - LIST_Y
+        step = span / len(RAIL_LETTERS)
+        for i, s in enumerate(self._rail_surfs):
+            surface.blit(s, s.get_rect(centerx=306,
+                                       centery=int(LIST_Y + (i + 0.5) * step)))
+
+        # big letter bubble while the finger is on the rail
+        if self._rail_active and self._rail_letter:
+            box = pygame.Rect(0, 0, 56, 56)
+            box.center = (248, 240)
+            pygame.draw.rect(surface, theme.CARD_BG, box, border_radius=12)
+            pygame.draw.rect(surface, theme.ACCENT, box, 2, border_radius=12)
+            big = theme.render(self._rail_letter, 26, theme.WHITE, bold=True)
+            surface.blit(big, big.get_rect(center=box.center))
+
+    def _rail_jump(self, y: int) -> None:
+        span = (NAV_Y - 24) - LIST_Y
+        frac = min(0.999, max(0.0, (y - LIST_Y) / span))
+        letter = RAIL_LETTERS[int(frac * len(RAIL_LETTERS))]
+        self._rail_letter = letter
+        if letter == "#":
+            idx = 0
+        else:
+            idx = bisect.bisect_left(self._letter_keys, letter)
+        idx = max(0, min(idx, len(self._items) - 1))
+        self._sel = idx
+        self._klist.jump_to(idx)
 
     # ── input ─────────────────────────────────────────────────────────────────
 
+    def on_press(self, x: int, y: int) -> bool:
+        # A-Z rail captures the gesture so dragging scrubs by letter
+        if (self._level == 0 and x >= RAIL_X and self._items
+                and LIST_Y <= y < NAV_Y - 24):
+            self._rail_active = True
+            self._rail_jump(y)
+            return True
+        return False
+
+    def on_drag(self, x: int, y: int) -> None:
+        if self._rail_active:
+            self._rail_jump(y)
+
+    def on_release(self, x: int, y: int) -> None:
+        self._rail_active = False
+
+    def _clamp_scroll(self) -> None:
+        row = self._sel // 2 if self._level == 1 else self._sel
+        self._klist.ensure_visible(row)
+
     def handle_touch(self, x: int, y: int) -> "Button | None":
-        if LIST_Y <= y < NAV_Y - 24 and not self._tap.pending:
-            di = self._klist.index_at(y - LIST_Y)
-            if 0 <= di < len(self._items):
-                self._sel = di                    # highlight flashes, then opens
-                self._tap.set(self._select)
-                return None
-        # "‹ back" hint in top-right header area
-        if y < 58 and x > 200 and self._level > 0:
-            return Button.BACK
+        if not (LIST_Y <= y < NAV_Y - 24) or self._tap.pending:
+            # "‹ back" hint in the header area
+            if y < LIST_Y and x > 200 and self._level > 0:
+                return Button.BACK
+            return super().handle_touch(x, y)
+
+        row_idx = self._klist.index_at(y - LIST_Y)
+        if self._level == 1:
+            col = 0 if x < 160 else 1
+            di = row_idx * 2 + col
+        else:
+            di = row_idx
+
+        if 0 <= di < len(self._items):
+            self._sel = di                    # highlight flashes, then opens
+            self._tap.set(self._select)
+            return None
+
         return super().handle_touch(x, y)
 
     def handle_long_press(self, x: int, y: int) -> bool:
         if self._level == 0 or not (LIST_Y <= y < NAV_Y - 24):
             return False
-        di = self._klist.index_at(y - LIST_Y)
+        row_idx = self._klist.index_at(y - LIST_Y)
+        if self._level == 1:
+            col = 0 if x < 160 else 1
+            di = row_idx * 2 + col
+        else:
+            di = row_idx
+
         if not (0 <= di < len(self._items)):
             return False
         self._sel = di
@@ -174,10 +288,18 @@ class BrowseScreen(ListScreen):
 
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
+        # In the album grid UP/DOWN move by a row (2), PREV/NEXT by a column.
+        step = 2 if self._level == 1 else 1
         if button == Button.UP:
-            self._sel = max(0, self._sel - 1)
+            self._sel = max(0, self._sel - step)
             self._clamp_scroll()
         elif button == Button.DOWN:
+            self._sel = min(len(self._items) - 1, self._sel + step)
+            self._clamp_scroll()
+        elif button == Button.PREV and self._level == 1:
+            self._sel = max(0, self._sel - 1)
+            self._clamp_scroll()
+        elif button == Button.NEXT and self._level == 1:
             self._sel = min(len(self._items) - 1, self._sel + 1)
             self._clamp_scroll()
         elif button == Button.SELECT:
@@ -275,13 +397,18 @@ class BrowseScreen(ListScreen):
     # ── data loading ──────────────────────────────────────────────────────────
 
     def _load_artists(self) -> None:
+        self.item_h = ITEM_H
+        self._klist.item_h = ITEM_H
         rows = self.app.db.execute(
             "SELECT id, name FROM artists ORDER BY name COLLATE NOCASE"
         ).fetchall()
         self._items = [_Item(label=r["name"], row_id=r["id"]) for r in rows]
+        self._letter_keys = [_letter_key(r["name"]) for r in rows]
         self._klist.set_count(len(self._items), reset=True)
 
     def _load_albums(self, artist_id: int) -> None:
+        self.item_h = GRID_H
+        self._klist.item_h = GRID_H
         rows = self.app.db.execute(
             """SELECT al.id, al.title, al.year, al.art_path
                FROM albums al
@@ -298,9 +425,11 @@ class BrowseScreen(ListScreen):
             )
             for r in rows
         ]
-        self._klist.set_count(len(self._items), reset=True)
+        self._klist.set_count(math.ceil(len(self._items) / 2), reset=True)
 
     def _load_tracks(self, album_id: int) -> None:
+        self.item_h = ITEM_H
+        self._klist.item_h = ITEM_H
         rows = self.app.db.execute(
             """SELECT path, title, track_number
                FROM tracks

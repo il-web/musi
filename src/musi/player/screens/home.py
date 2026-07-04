@@ -11,13 +11,15 @@ from musi.player import art_cache, audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
-from musi.player.widgets import PendingTap
+from musi.player.widgets import KineticList, PendingTap, draw_scrollbar
 
 # Menu items: (label, screen_import_fn)
 MENU = [
     "Now Playing",
     "Browse Library",
     "Search",
+    "Recently Played",
+    "Most Played",
     "WiFi Transfer",
     "Settings",
 ]
@@ -48,6 +50,8 @@ class HomeScreen(Screen):
         self._nav_surf:   pygame.Surface | None = None
         self._menu_surfs: list[pygame.Surface] = []
         self._tap = PendingTap()
+        self._klist = KineticList(ITEM_H, NAV_Y - MENU_Y)
+        self._klist.set_count(len(MENU))
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -109,24 +113,34 @@ class HomeScreen(Screen):
             pygame.draw.rect(surface, self._accent, (18, CARD_Y + CARD_H - 12, filled, 4), border_radius=2)
 
         # ── menu items ────────────────────────────────────────────────────────
-        for i, label_surf in enumerate(self._menu_surfs):
-            y = MENU_Y + i * ITEM_H
+        self._klist.update()
+        first = self._klist.first_visible()
+        shift = self._klist.pixel_shift()
+
+        clip = surface.get_clip()
+        surface.set_clip(pygame.Rect(0, MENU_Y, 320, NAV_Y - MENU_Y))
+
+        for vi in range(self._klist.visible_rows()):
+            di = first + vi
+            if di >= len(MENU):
+                break
+            y = MENU_Y + vi * ITEM_H - shift
             item_rect = pygame.Rect(10, y, 300, ITEM_H - 4)
 
-            if i == self._sel:
-                # selected: filled accent background
+            if di == self._sel:
                 pygame.draw.rect(surface, self._accent, item_rect, border_radius=8)
-                _draw_item_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.WHITE)
-                surface.blit(label_surf, (60, y + (ITEM_H - label_surf.get_height()) // 2 - 2))
-                # chevron
+                _draw_item_icon(surface, di, 36, y + (ITEM_H - 4) // 2, theme.WHITE)
+                surface.blit(self._menu_surfs[di], (60, y + (ITEM_H - self._menu_surfs[di].get_height()) // 2 - 2))
                 icons.draw_chevron_right(surface, 296, y + (ITEM_H - 4) // 2, theme.WHITE)
             else:
-                # unselected: card bg
                 pygame.draw.rect(surface, theme.CARD_BG, item_rect, border_radius=8)
-                _draw_item_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.DIM)
-                dim_surf = theme.render(MENU[i], 15, theme.DIM)
+                _draw_item_icon(surface, di, 36, y + (ITEM_H - 4) // 2, theme.DIM)
+                dim_surf = theme.render(MENU[di], 15, theme.DIM)
                 surface.blit(dim_surf, (60, y + (ITEM_H - dim_surf.get_height()) // 2 - 2))
                 icons.draw_chevron_right(surface, 296, y + (ITEM_H - 4) // 2, theme.CARD_BG)
+
+        surface.set_clip(clip)
+        draw_scrollbar(surface, 314, MENU_Y, NAV_Y - MENU_Y, self._klist)
 
         # ── nav hint ──────────────────────────────────────────────────────────
         surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
@@ -138,38 +152,56 @@ class HomeScreen(Screen):
         if CARD_Y <= y < CARD_Y + CARD_H:
             return Button.PLAY_PAUSE
         # Tap a menu item → highlight flashes, then it opens
-        if MENU_Y <= y < MENU_Y + len(MENU) * ITEM_H and not self._tap.pending:
-            i = (y - MENU_Y) // ITEM_H
-            if 0 <= i < len(MENU):
-                self._sel = i
+        if MENU_Y <= y < NAV_Y - 24 and not self._tap.pending:
+            di = self._klist.index_at(y - MENU_Y)
+            if 0 <= di < len(MENU):
+                self._sel = di
                 self._tap.set(self._open_selected)
                 return None
         return super().handle_touch(x, y)
 
+    def handle_scroll(self, dy: float) -> None:
+        self._klist.scroll_by(dy)
+
+    def handle_scroll_start(self) -> None:
+        self._klist.start_touch()
+
+    def handle_scroll_end(self) -> None:
+        self._klist.end_touch()
+
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.UP:
-            self._sel = (self._sel - 1) % len(MENU)
+            self._sel = max(0, self._sel - 1)
+            self._klist.ensure_visible(self._sel)
         elif button == Button.DOWN:
-            self._sel = (self._sel + 1) % len(MENU)
-        elif button == Button.PLAY_PAUSE:
-            self.app.toggle_play()
+            self._sel = min(len(MENU) - 1, self._sel + 1)
+            self._klist.ensure_visible(self._sel)
         elif button == Button.SELECT:
             self._open_selected()
+        elif button == Button.PLAY_PAUSE:
+            self.app.toggle_play()
 
     def _open_selected(self) -> None:
-        if self._sel == 0:
+        label = MENU[self._sel]
+        if label == "Now Playing":
             from musi.player.screens.now_playing import NowPlayingScreen
             self.app.push(NowPlayingScreen(self.app))
-        elif self._sel == 1:
+        elif label == "Browse Library":
             from musi.player.screens.browse import BrowseScreen
             self.app.push(BrowseScreen(self.app))
-        elif self._sel == 2:
+        elif label == "Search":
             from musi.player.screens.search import SearchScreen
             self.app.push(SearchScreen(self.app))
-        elif self._sel == 3:
+        elif label == "Recently Played":
+            from musi.player.screens.history import HistoryScreen
+            self.app.push(HistoryScreen(self.app, mode="recent"))
+        elif label == "Most Played":
+            from musi.player.screens.history import HistoryScreen
+            self.app.push(HistoryScreen(self.app, mode="most"))
+        elif label == "WiFi Transfer":
             from musi.player.screens.usb import USBScreen
             self.app.push(USBScreen(self.app))
-        elif self._sel == 4:
+        elif label == "Settings":
             from musi.player.screens.settings import SettingsScreen
             self.app.push(SettingsScreen(self.app))
 
@@ -215,7 +247,13 @@ def _draw_item_icon(surface, index, cx, cy, colour):
     elif index == 2: # Search — magnifier
         pygame.draw.circle(surface, colour, (cx - 2, cy - 2), 6, 2)
         pygame.draw.line(surface, colour, (cx + 3, cy + 3), (cx + 8, cy + 8), 2)
-    elif index == 3: # WiFi Transfer — WiFi arcs
+    elif index == 3: # Recently Played
+        pygame.draw.circle(surface, colour, (cx, cy), 7, 2)
+        pygame.draw.lines(surface, colour, False, [(cx, cy - 3), (cx, cy), (cx + 3, cy)], 2)
+    elif index == 4: # Most Played
+        pygame.draw.lines(surface, colour, False, [(cx - 5, cy + 5), (cx - 2, cy + 2), (cx + 1, cy + 5), (cx + 5, cy - 1)], 2)
+        pygame.draw.polygon(surface, colour, [(cx + 2, cy - 1), (cx + 5, cy - 4), (cx + 5, cy + 2)])
+    elif index == 5: # WiFi Transfer — WiFi arcs
         import math
         for r, a in [(10, 0.55), (6, 0.6), (2, 0.0)]:
             if r == 2:
@@ -227,6 +265,6 @@ def _draw_item_icon(surface, index, cx, cy, colour):
                     for t in range(-20, 21)
                 ]
                 pygame.draw.lines(surface, colour, False, pts, 2)
-    elif index == 4: # Settings — gear
+    elif index == 6: # Settings — gear
         pygame.draw.circle(surface, colour, (cx, cy), 7, 2)
         pygame.draw.circle(surface, colour, (cx, cy), 3)

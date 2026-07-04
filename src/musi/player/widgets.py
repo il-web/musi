@@ -104,6 +104,11 @@ class KineticList:
         """Item index for a y relative to the list's top edge."""
         return int((y_view + self.offset) // self.item_h)
 
+    def jump_to(self, idx: int) -> None:
+        """Snap row idx to the top of the view (no animation)."""
+        self.offset = max(0.0, min(self.max_offset, float(idx * self.item_h)))
+        self._vel = 0.0
+
     def ensure_visible(self, idx: int) -> None:
         """Scroll the minimum amount so row idx is fully on screen."""
         top = idx * self.item_h

@@ -179,6 +179,10 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    def pause(self) -> None:
+        """Pause playback (no-op if already paused/stopped)."""
+        self._cmd(lambda: self._client.pause(1))
+
     def next_track(self) -> None:
         self._cmd(lambda: self._client.next())
 

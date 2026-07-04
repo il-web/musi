@@ -45,17 +45,19 @@ DONE
       duplicated across home/browse/now_playing/statusbar)
     - Replace silent "except Exception: pass" with logging to journald
 
+[x] Features pack
+    - Recently Played + Most Played screens (play_history is finally read);
+      Home menu entries, tap = play + Now Playing, long-press = queue menu
+    - Home menu converted to KineticList (7 items overflow -> scrolls)
+    - Album grid: Browse albums level is a 2-column art grid
+    - A-Z fast-scroll rail on the artists list (tap or drag = letter bubble)
+    - Sleep timer: Settings -> Sleep Timer (Off/15/30/60/90 min) pauses
+      playback when it fires; remaining time shown on the settings row
+    - Battery icon in status bar still BLOCKED on hardware: needs a fuel
+      gauge (e.g. MAX17048, I2C) on the musi-link PCB rev B
+
 NEXT PACKS (pick one)
 ---------------------
-[ ] Features
-    - "Recently played" row on Home (play_history table is already populated,
-      nothing reads it); "Most played" is the same query with GROUP BY
-    - Album grid view in Browse (2-column art grid using existing thumbnails)
-    - A-Z fast-scroll rail on the artists list
-    - Sleep timer (stop after N minutes)
-    - Battery icon in status bar — BLOCKED on hardware: needs a fuel gauge
-      (e.g. MAX17048, I2C) on the musi-link PCB rev B
-
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
     6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)
     - Circuit: P-MOSFET Q1 in series TP4056 OUT+ -> MT3608 VIN
