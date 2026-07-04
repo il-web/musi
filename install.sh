@@ -185,8 +185,8 @@ say "[9c] Power-off / reboot permission"
 # Sudoers rules must be a single line; a malformed sudoers.d file makes every
 # sudo call print parse errors. Validate with visudo before installing.
 TMP_SUDOERS="$(mktemp)"
-printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i, /usr/bin/nmcli *, /usr/sbin/iw *, /usr/bin/raspi-config nonint do_overlayfs *\n' \
-    "$USER_NAME" > "$TMP_SUDOERS"
+printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i, /usr/bin/nmcli *, /usr/sbin/iw *, /usr/bin/raspi-config nonint do_overlayfs *, /bin/bash %s/update.sh --root *\n' \
+    "$USER_NAME" "$SCRIPT_DIR" > "$TMP_SUDOERS"
 if sudo visudo -c -f "$TMP_SUDOERS" > /dev/null; then
     sudo install -m 0440 -o root -g root "$TMP_SUDOERS" /etc/sudoers.d/musi-power
 else
@@ -245,6 +245,12 @@ systemctl --user daemon-reload
 systemctl --user enable mpd musi-bt-router mpris-proxy musi-ui 2>/dev/null || true
 sudo hostnamectl set-hostname musi 2>/dev/null || true
 sudo systemctl enable --now avahi-daemon 2>/dev/null || true
+
+# Seed the incremental-update level: a full install covers everything
+# update.sh knows about, so OTA updates only apply steps added later.
+UPDATE_LEVEL="$(sed -n 's/^LATEST_STEP=\([0-9]*\)$/\1/p' "$SCRIPT_DIR/update.sh" | head -1)"
+mkdir -p "$HOME/.local/share/musi"
+echo "${UPDATE_LEVEL:-0}" > "$HOME/.local/share/musi/update-level"
 
 say "Done"
 cat <<EOF

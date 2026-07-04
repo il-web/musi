@@ -96,16 +96,18 @@ NEXT PACKS (pick one)
 
 PI MAINTENANCE NOTES
 --------------------
-- OTA (Settings -> Updates) does git pull + pip install + service restart;
-  it does NOT run install.sh. After packs that change install.sh, run once:
-      cd ~/musi && bash install.sh     (idempotent)
+- OTA (Settings -> Updates) = git pull + pip install + update.sh + restart.
+  update.sh applies numbered incremental config steps (state in
+  ~/.local/share/musi/update-level) — fast, no apt. When a pack needs
+  config/service changes: add a user_N/root_N step to update.sh, bump
+  LATEST_STEP, and mirror the change in install.sh for fresh installs.
+- install.sh is for FIRST-TIME setup only now (it seeds update-level so
+  steps don't re-run). It's still idempotent if ever needed.
+- ONE-TIME: the next Pi update still needs a manual `bash install.sh` over
+  SSH — the sudoers rule that lets update.sh run its root steps (and the
+  hardening sudoers from 40f862f) doesn't exist on the device yet.
+  After that, OTA handles everything by itself.
 - Already applied on the Pi: backlight udev rule, sudoers with nmcli.
-- OS hardening pack changed install.sh (9c sudoers + new 9d) — run it once
-  on the Pi after updating, or Storage lock / iw powersave will get
-  "sudo: a password is required".
-- BT stability pack ALSO needs that install.sh run: it edits
-  /etc/bluetooth/main.conf and reinstalls ~/.local/bin/musi-bt-router
-  (OTA only updates the repo copy, not the installed one).
 - Storage lock lives in Settings -> Power; while ON, Updates and WiFi
   Transfer are blocked by design. Unlock + reboot to update or add music.
 - Screen timeouts tunable via MUSI_DIM_S / MUSI_OFF_S env (0 disables).

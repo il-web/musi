@@ -9,7 +9,9 @@ result dict the UI can display.
 """
 from __future__ import annotations
 
+import logging
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -129,9 +131,26 @@ def apply(progress: "Callable[[float, str], None] | None" = None) -> tuple[bool,
                 capture_output=True, text=True, timeout=300,
             )
         except Exception:
-            import logging
             logging.warning('Ignored exception', exc_info=True)
-    step(0.90, "Installed")
+    step(0.82, "Installed")
+
+    # Incremental config sync (update.sh): applies only the numbered steps
+    # this device hasn't run yet — services, bluez/sudoers config, etc.
+    # Best-effort: a failure (e.g. missing sudo rule before the first
+    # install.sh run) is logged but never blocks the code update.
+    step(0.86, "Applying config updates…")
+    upd = REPO_DIR / "update.sh"
+    if upd.exists() and sys.platform != "win32":
+        try:
+            r = subprocess.run(
+                ["bash", str(upd)],
+                capture_output=True, text=True, timeout=180,
+            )
+            logging.info("update.sh rc=%s\n%s", r.returncode,
+                         (r.stdout + r.stderr).strip())
+        except Exception:
+            logging.warning("update.sh failed", exc_info=True)
+    step(0.90, "Configured")
 
     # Restart the service — this terminates the current process and relaunches
     # the player on the new code. Detached so the SIGTERM doesn't pre-empt logging.
