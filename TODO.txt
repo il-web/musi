@@ -56,6 +56,19 @@ DONE
     - Battery icon in status bar still BLOCKED on hardware: needs a fuel
       gauge (e.g. MAX17048, I2C) on the musi-link PCB rev B
 
+[x] BT stability + WiFi icon pack
+    - Bluetooth connect flow verifies the real result (bluetoothctl info),
+      retries up to 3x, powers the adapter on and trusts the device first
+      (untrusted devices are what bluetoothd silently drops seconds after
+      connecting — the "connects then disconnects itself" bug)
+    - musi-bt-router: reconnect watchdog — on an unexpected drop it retries
+      the same device 3x before falling back to the DAC; a user-initiated
+      disconnect (flag /tmp/musi-bt-user-disconnect) is respected
+    - install.sh 6: bluez main.conf — AutoEnable, FastConnectable,
+      ReconnectAttempts/Intervals
+    - Status bar WiFi icon: signal arcs from /proc/net/wireless (no
+      subprocess), red slash when down; player/net_status.py
+
 NEXT PACKS (pick one)
 ---------------------
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
@@ -90,6 +103,9 @@ PI MAINTENANCE NOTES
 - OS hardening pack changed install.sh (9c sudoers + new 9d) — run it once
   on the Pi after updating, or Storage lock / iw powersave will get
   "sudo: a password is required".
+- BT stability pack ALSO needs that install.sh run: it edits
+  /etc/bluetooth/main.conf and reinstalls ~/.local/bin/musi-bt-router
+  (OTA only updates the repo copy, not the installed one).
 - Storage lock lives in Settings -> Power; while ON, Updates and WiFi
   Transfer are blocked by design. Unlock + reboot to update or add music.
 - Screen timeouts tunable via MUSI_DIM_S / MUSI_OFF_S env (0 disables).

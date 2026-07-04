@@ -5,8 +5,10 @@
 set -u
 ASOUNDRC="$HOME/.asoundrc"
 FLAG=/tmp/musi-bt-connecting
+USER_FLAG=/tmp/musi-bt-user-disconnect   # written by the app before an intentional disconnect
+RECONNECT_TRIES=3
 MON="$(command -v bluealsactl || command -v bluealsa-cli)"
-rm -f "$FLAG" 2>/dev/null
+rm -f "$FLAG" "$USER_FLAG" 2>/dev/null
 
 dac_dev() {
   # Reference the DAC by its stable card NAME, not index — the ALSA card index
@@ -74,6 +76,34 @@ to_dac() {
   restart_mpd
 }
 
+bt_connected() {
+  bluetoothctl info "$1" 2>/dev/null | grep -q "Connected: yes"
+}
+
+# True while a fresh user-disconnect flag exists (the app wrote it just before
+# an intentional disconnect) — the watchdog must not fight the user. A stale
+# flag (>60 s) is ignored and cleaned so it can't block real drop recovery.
+user_disconnected() {
+  [ -f "$USER_FLAG" ] || return 1
+  now=$(date +%s); mt=$(stat -c %Y "$USER_FLAG" 2>/dev/null || echo 0)
+  [ $((now - mt)) -le 60 ] && return 0
+  rm -f "$USER_FLAG"
+  return 1
+}
+
+# Unexpected drop (range, interference, speaker hiccup): try to get the same
+# device back before giving up. A successful connect emits PCMAdded, which the
+# monitor loop routes as usual — playback resumes where it was.
+try_reconnect() {
+  for _ in $(seq 1 "$RECONNECT_TRIES"); do
+    sleep 3
+    bluetoothctl connect "$1" >/dev/null 2>&1
+    sleep 2
+    bt_connected "$1" && return 0
+  done
+  return 1
+}
+
 [ -z "$MON" ] && { echo "no bluealsa cli found"; exit 1; }
 
 # startup: make sure ~/.asoundrc names the right output, but only restart MPD if
@@ -97,8 +127,18 @@ fi
       [ -n "$mac" ] && to_bt "$mac"
       ;;
     *PCMRemoved*)
+      mac="$(printf '%s' "$line" | grep -oE 'dev_[0-9A-Fa-f_]+' | head -1 | sed 's/^dev_//; s/_/:/g')"
+      # one disconnect emits several PCM events; if the device is already back
+      # (or the watchdog just recovered it) there is nothing to do
+      if [ -n "$mac" ] && bt_connected "$mac"; then continue; fi
       other="$(remaining_bt)"
-      if [ -n "$other" ]; then to_bt "$other"; else to_dac; fi
+      if [ -n "$other" ]; then
+        to_bt "$other"
+      elif [ -n "$mac" ] && ! user_disconnected && try_reconnect "$mac"; then
+        : # reconnected — the PCMAdded event it fires re-routes and resumes
+      else
+        to_dac
+      fi
       ;;
   esac
 done

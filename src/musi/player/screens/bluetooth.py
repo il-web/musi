@@ -13,6 +13,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 
 import pygame
@@ -26,6 +27,13 @@ SCAN_RECT = pygame.Rect(10, 50, 300, 30)   # "Scan for devices" button
 LIST_Y = 88      # first device card top
 ITEM_H = 64      # height per device card
 NAV_Y  = 456
+
+# Written before a user-initiated disconnect so musi-bt-router knows not to
+# fight it with its auto-reconnect watchdog.
+USER_DISCONNECT_FLAG = "/tmp/musi-bt-user-disconnect"
+
+CONNECT_ATTEMPTS = 3     # speakers fresh out of power-on often fail the first try
+CONNECT_RETRY_S  = 2.0
 
 
 @dataclass
@@ -260,17 +268,8 @@ class BluetoothScreen(ListScreen):
                     ["bluetoothctl", "--timeout", "25", "pair", dev.mac],
                     capture_output=True, text=True, timeout=30,
                 )
-                subprocess.run(
-                    ["bluetoothctl", "trust", dev.mac],
-                    capture_output=True, timeout=6,
-                )
-                subprocess.run(
-                    ["bluetoothctl", "connect", dev.mac],
-                    capture_output=True, timeout=15,
-                )
-                connected = self._is_connected(dev.mac)
-                dev.paired    = True
-                dev.connected = connected
+                dev.paired = True
+                connected = self._connect_verified(dev)
                 self._action_msg = (
                     f"Connected to {dev.name}" if connected
                     else f"Paired {dev.name} — tap to connect"
@@ -284,22 +283,34 @@ class BluetoothScreen(ListScreen):
         threading.Thread(target=_run, daemon=True).start()
 
     def _toggle(self, dev: _Device) -> None:
-        action = "disconnect" if dev.connected else "connect"
-        self._action_msg = f"{'Disconnecting' if dev.connected else 'Connecting'} {dev.name}…"
+        disconnecting = dev.connected
+        self._action_msg = f"{'Disconnecting' if disconnecting else 'Connecting'} {dev.name}…"
         self._busy       = True
 
         def _run() -> None:
             try:
-                subprocess.run(
-                    ["bluetoothctl", action, dev.mac],
-                    capture_output=True, timeout=15,
-                )
-                dev.connected = not dev.connected
-                self._action_msg = (
-                    f"Connected to {dev.name}" if dev.connected
-                    else f"Disconnected from {dev.name}"
-                )
-                # prod audio_detect to re-check on next poll
+                if disconnecting:
+                    # tell the router this drop is intentional — no auto-reconnect
+                    try:
+                        with open(USER_DISCONNECT_FLAG, "w") as f:
+                            f.write(dev.mac)
+                    except OSError:
+                        pass
+                    subprocess.run(
+                        ["bluetoothctl", "disconnect", dev.mac],
+                        capture_output=True, timeout=15,
+                    )
+                    dev.connected = self._is_connected(dev.mac)
+                    self._action_msg = (
+                        f"Disconnected from {dev.name}" if not dev.connected
+                        else f"Couldn't disconnect {dev.name}"
+                    )
+                else:
+                    connected = self._connect_verified(dev)
+                    self._action_msg = (
+                        f"Connected to {dev.name}" if connected
+                        else f"Couldn't connect — is {dev.name} turned on?"
+                    )
                 audio_detect._last_started = -999.0
             except Exception as exc:
                 self._action_msg = f"Failed: {exc}"
@@ -307,6 +318,36 @@ class BluetoothScreen(ListScreen):
                 self._busy = False
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def _connect_verified(self, dev: _Device) -> bool:
+        """Connect with retries and report the REAL state.
+
+        Adapter power-on + trust come first: an untrusted device is dropped
+        by bluetoothd seconds after connecting (the classic 'connects then
+        disconnects itself'), and pairing done from the speaker side never
+        set trust.
+        """
+        subprocess.run(["bluetoothctl", "power", "on"],
+                       capture_output=True, timeout=6)
+        subprocess.run(["bluetoothctl", "trust", dev.mac],
+                       capture_output=True, timeout=6)
+
+        for attempt in range(CONNECT_ATTEMPTS):
+            if attempt:
+                self._action_msg = (
+                    f"Connecting {dev.name}… (retry {attempt + 1}/{CONNECT_ATTEMPTS})"
+                )
+                time.sleep(CONNECT_RETRY_S)
+            subprocess.run(
+                ["bluetoothctl", "connect", dev.mac],
+                capture_output=True, timeout=20,
+            )
+            if self._is_connected(dev.mac):
+                dev.connected = True
+                return True
+
+        dev.connected = self._is_connected(dev.mac)
+        return dev.connected
 
 
 

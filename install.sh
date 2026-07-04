@@ -88,6 +88,21 @@ EOF
 # ── 6. Bluetooth audio (bluez-alsa) ───────────────────────────────────────────
 say "[6/10] Bluetooth audio (bluez-alsa) + pairing agent"
 sudo systemctl enable --now bluealsa 2>/dev/null || true
+
+# bluez stability policy: adapter on at boot, fast reconnect window, and
+# bluez's own link-loss reconnect for trusted audio devices. The stock
+# main.conf ships these commented out — uncomment-and-set is idempotent
+# (a re-run matches nothing once the lines are live).
+BT_MAIN=/etc/bluetooth/main.conf
+if [ -f "$BT_MAIN" ]; then
+    sudo sed -i \
+        -e 's/^#[[:space:]]*FastConnectable[[:space:]]*=.*/FastConnectable = true/' \
+        -e 's/^#[[:space:]]*AutoEnable[[:space:]]*=.*/AutoEnable=true/' \
+        -e 's/^#[[:space:]]*ReconnectAttempts[[:space:]]*=.*/ReconnectAttempts=5/' \
+        -e 's/^#[[:space:]]*ReconnectIntervals[[:space:]]*=.*/ReconnectIntervals=1,2,4,8,16/' \
+        "$BT_MAIN"
+    sudo systemctl restart bluetooth 2>/dev/null || true
+fi
 # Persistent auto-accept pairing agent (so the app can pair new devices).
 sudo tee /etc/systemd/system/bt-agent.service > /dev/null <<EOF
 [Unit]

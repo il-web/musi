@@ -1,7 +1,7 @@
 """Shared status bar — rendered at y=0 on every screen.
 
 Content (left → right):
-    [musi]        [HH:MM]        [headphone/BT icon]  [MPD dot]
+    [musi]        [HH:MM]        [WiFi]  [headphone/BT icon]  [MPD dot]
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pygame
 
-from musi.player import icons, theme
+from musi.player import icons, net_status, theme
 
 BAR_H: int = 26   # height in virtual (320×480) pixels
 
@@ -55,6 +55,10 @@ def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = Fal
     if _time_surf:
         surface.blit(_time_surf, _time_surf.get_rect(centerx=160, centery=cy))
 
+    # ── WiFi icon ─────────────────────────────────────────────────────────────
+    wifi_on, strength = net_status.wifi_status()
+    _draw_wifi(surface, 252, cy, wifi_on, strength)
+
     # ── audio icon ────────────────────────────────────────────────────────────
     if audio_type == "bluetooth":
         icons.draw_bt_glyph(surface, 278, cy, theme.ACCENT)
@@ -70,6 +74,23 @@ def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = Fal
 # ── icon helpers ──────────────────────────────────────────────────────────────
 
 
+def _draw_wifi(surface: pygame.Surface, cx: int, cy: int,
+               connected: bool, strength: int) -> None:
+    """WiFi arcs (~16×12 px); lit arcs show strength, red slash when down."""
+    base = cy + 4
+    for i, r in enumerate((2, 5, 8)):          # dot, inner arc, outer arc
+        lit = connected and strength >= i + 1
+        col = theme.DIM if lit else (45, 45, 60)
+        if r == 2:
+            pygame.draw.circle(surface, col, (cx, base), 2)
+        else:
+            pts = [(cx + int(r * math.cos(math.pi * (0.5 + 0.45 * t / 10))),
+                    base - int(r * math.sin(math.pi * (0.5 + 0.45 * t / 10))))
+                   for t in range(-10, 11)]
+            pygame.draw.lines(surface, col, False, pts, 2)
+    if not connected:
+        pygame.draw.line(surface, (200, 90, 90),
+                         (cx - 6, base + 2), (cx + 6, base - 8), 2)
 
 
 def _draw_headphones(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
