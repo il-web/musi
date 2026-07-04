@@ -69,8 +69,37 @@ DONE
     - Status bar WiFi icon: signal arcs from /proc/net/wireless (no
       subprocess), red slash when down; player/net_status.py
 
-NEXT PACKS (pick one)
----------------------
+NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
+2026-07-04-device-api-design.md on the dev machine)
+--------------------------------------------------------------
+Goal: musi website (moving base44 -> Vercel) browses + manages the library
+remotely. Library management only, NO playback control. Remote transport =
+Cloudflare Tunnel (needs a domain on a free Cloudflare account; must use
+the cloudflared-linux-arm build — armhf crashes on the Zero W's ARMv6).
+
+[ ] API pack 1 — core (read-only)
+    - New musi.api package grown from wifi_transfer/server.py; runs ALWAYS
+      as musi-api.service (port 8080); WiFi Transfer screen becomes a
+      "server info" screen (URL + QR), old upload page stays at /
+    - Bearer-token auth on everything (token in ~/.local/share/musi/
+      api-token; new Settings -> API screen: show/regenerate token)
+    - CORS allowlist for the site origin
+    - GET /api/v1/status (git version, statvfs storage, counts, lock state)
+    - GET /api/v1/albums, /albums/{id}, /albums/{id}/art
+    - install.sh mirror + update.sh step for the new service
+
+[ ] API pack 2 — writes
+    - POST /upload (move existing logic), DELETE /albums/{id} and
+      /tracks/{id} (files + DB + mpd db_update), PATCH /tracks/{id}
+      (mutagen tag write + rescan), PUT /albums/{id}/art (art override
+      that survives rescan — check art.py extraction order)
+    - All writes return 423 while Storage lock is on
+
+[ ] API pack 3 — remote (Cloudflare Tunnel)
+    - PREREQ: Ilay buys/moves a domain onto Cloudflare (free plan)
+    - cloudflared linux-arm pinned version via update.sh root step;
+      named tunnel -> https://api.<domain>; docs + website env token
+
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
     6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)
     - Circuit: P-MOSFET Q1 in series TP4056 OUT+ -> MT3608 VIN
