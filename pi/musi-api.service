@@ -1,0 +1,11 @@
+[Unit]
+Description=musi device API (library management HTTP server)
+After=network.target
+
+[Service]
+ExecStart=%h/musi/.venv/bin/python -m musi.api
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

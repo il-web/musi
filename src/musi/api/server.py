@@ -1,0 +1,381 @@
+"""musi device API — always-on Flask app (port 8080).
+
+Grown from the old WiFi-transfer server: the drag-and-drop upload page still
+lives at ``/`` for LAN use, and ``/api/v1/*`` adds the authenticated JSON API
+the musi website talks to. Runs permanently as the ``musi-api`` systemd user
+service; the WiFi Transfer screen just shows this server's URL now.
+
+Auth: every ``/api/v1`` request needs ``Authorization: Bearer <token>``
+(token file: see musi.api.auth). The legacy ``/``, ``/upload`` and ``/stats``
+routes stay open — they are only reachable on the LAN until the Cloudflare
+Tunnel pack, which will revisit them.
+"""
+from __future__ import annotations
+
+import hmac
+import logging
+import shutil
+import sqlite3
+import threading
+import time
+from pathlib import Path
+from typing import Callable
+
+from flask import Flask, jsonify, request, send_file
+
+from musi.api import auth
+
+PORT = 8080
+AUDIO_EXT = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".opus", ".wma", ".ape"}
+
+# Origins allowed to call /api/v1 from a browser (comma-separated env override).
+DEFAULT_CORS_ORIGINS = "https://musiweb.base44.app"
+
+_STARTED = time.monotonic()
+
+# Silence Flask's request logger so it doesn't spam the journal
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+log = logging.getLogger(__name__)
+
+
+# ── HTML served at / ──────────────────────────────────────────────────────────
+
+_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>musi — WiFi Transfer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0f;color:#fff;font-family:-apple-system,system-ui,sans-serif;
+     min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
+.sub{color:#78788a;margin-bottom:36px;font-size:.95em}
+.drop{border:2px dashed #ff5c8a;border-radius:16px;padding:52px 32px;text-align:center;
+      cursor:pointer;transition:background .15s;width:100%;max-width:480px}
+.drop.over{background:rgba(255,92,138,.1)}
+.drop p{color:#78788a;margin-top:10px;font-size:.9em;line-height:1.6}
+.drop svg{opacity:.85}
+#fi{display:none}
+.bar-wrap{width:100%;max-width:480px;background:#16162a;border-radius:6px;
+          height:8px;margin-top:20px;display:none;overflow:hidden}
+.bar{height:100%;background:#ff5c8a;border-radius:6px;transition:width .25s;width:0}
+.status{margin-top:14px;color:#78788a;font-size:.9em;min-height:1.2em;text-align:center}
+.stats{margin-top:36px;color:#78788a;font-size:.85em}
+.stats span{color:#fff;font-weight:600}
+</style>
+</head>
+<body>
+<h1>musi</h1>
+<p class="sub">WiFi Transfer</p>
+
+<div class="drop" id="drop" onclick="document.getElementById('fi').click()">
+  <svg width="44" height="44" viewBox="0 0 24 24" fill="none"
+       stroke="#ff5c8a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+  <p>Drop music files here<br>or tap to browse</p>
+  <p style="font-size:.8em;margin-top:6px;color:#50505f">
+    MP3 · FLAC · OGG · M4A · WAV · OPUS · WMA</p>
+  <input type="file" id="fi" multiple
+         accept=".mp3,.flac,.ogg,.m4a,.aac,.wav,.opus,.wma,.ape">
+</div>
+
+<div class="bar-wrap" id="bw"><div class="bar" id="bar"></div></div>
+<div class="status" id="st"></div>
+<div class="stats">Library: <span id="tc">…</span> tracks</div>
+
+<script>
+const drop=document.getElementById('drop'),
+      fi=document.getElementById('fi'),
+      bw=document.getElementById('bw'),
+      bar=document.getElementById('bar'),
+      st=document.getElementById('st');
+
+drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over')});
+drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');upload(e.dataTransfer.files)});
+fi.addEventListener('change',()=>upload(fi.files));
+
+async function upload(files){
+  if(!files.length)return;
+  bw.style.display='block';bar.style.width='0';
+  let ok=0,skip=0,locked=false;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    st.textContent='Uploading '+f.name+' ('+(i+1)+'/'+files.length+')…';
+    const fd=new FormData();fd.append('file',f);
+    const r=await fetch('/upload',{method:'POST',body:fd});
+    if(r.status===423){locked=true;break}
+    const d=await r.json();
+    if(d.status==='ok')ok++;else skip++;
+    bar.style.width=((i+1)/files.length*100)+'%';
+  }
+  if(locked){
+    st.innerHTML='<span style="color:#ff5c8a">✗</span> Storage is locked — unlock in Settings → Power on the device';
+    return;
+  }
+  const msg=[];
+  if(ok)msg.push(ok+' file'+(ok!==1?'s':'')+' added');
+  if(skip)msg.push(skip+' already existed');
+  st.innerHTML='<span style="color:#4dc87a">✓</span> '+msg.join(', ');
+  fetchStats();
+}
+
+async function fetchStats(){
+  try{const r=await fetch('/stats');const d=await r.json();
+  document.getElementById('tc').textContent=d.tracks;}catch(e){}
+}
+fetchStats();setInterval(fetchStats,5000);
+</script>
+</body>
+</html>
+"""
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+class RescanDebouncer:
+    """Coalesce a burst of uploads into one library rescan 3 s after the last."""
+
+    def __init__(self, music_root: Path, art_dir: Path, db_path: Path) -> None:
+        self._music_root = music_root
+        self._art_dir    = art_dir
+        self._db_path    = db_path
+        self._timer: threading.Timer | None = None
+
+    def schedule(self) -> None:
+        if self._timer:
+            self._timer.cancel()
+        self._timer = threading.Timer(
+            3.0, _rescan, args=(self._music_root, self._art_dir, self._db_path),
+        )
+        self._timer.daemon = True
+        self._timer.start()
+
+
+def _rescan(music_root: Path, art_dir: Path, db_path: Path) -> None:
+    try:
+        from musi.library.db import open_db
+        from musi.library.scanner import scan
+        conn = open_db(db_path)
+        scan(music_root=music_root, art_dir=art_dir, conn=conn)
+        conn.close()
+    except Exception:
+        log.warning("rescan failed", exc_info=True)
+
+
+def _storage_locked() -> bool:
+    from musi.player import hardening
+    return hardening.overlay_active()
+
+
+def _uptime_s() -> int:
+    """Device uptime; falls back to server-process uptime off-Pi."""
+    try:
+        return int(float(Path("/proc/uptime").read_text().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return int(time.monotonic() - _STARTED)
+
+
+def _cors_origins() -> "set[str]":
+    import os
+    raw = os.environ.get("MUSI_API_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
+    return {o.strip() for o in raw.split(",") if o.strip()}
+
+
+# ── app factory ───────────────────────────────────────────────────────────────
+
+def create_app(
+    music_root: Path,
+    db_path: Path,
+    art_dir: Path,
+    *,
+    token_provider: "Callable[[], str] | None" = None,
+    cors_origins: "set[str] | None" = None,
+) -> Flask:
+    """Build the Flask app. ``token_provider`` is called per request so a
+    regenerated token file takes effect without restarting the service."""
+    get_token = token_provider or auth.load_token
+    origins   = cors_origins if cors_origins is not None else _cors_origins()
+    debouncer = RescanDebouncer(music_root, art_dir, db_path)
+
+    app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 256 * 1024 * 1024  # 256 MB
+
+    def _db() -> sqlite3.Connection:
+        from musi.library.db import open_db
+        return open_db(db_path)
+
+    # ── auth + CORS gate for /api/v1 ──────────────────────────────────────────
+
+    @app.before_request
+    def _gate():
+        if not request.path.startswith("/api/"):
+            return None
+        if request.method == "OPTIONS":       # CORS preflight carries no auth
+            return app.make_default_options_response()
+        supplied = request.headers.get("Authorization", "")
+        if supplied.startswith("Bearer ") and hmac.compare_digest(
+            supplied[7:].strip(), get_token()
+        ):
+            return None
+        return jsonify(error="unauthorized"), 401
+
+    @app.after_request
+    def _cors(resp):
+        origin = request.headers.get("Origin")
+        if origin and origin in origins and request.path.startswith("/api/"):
+            resp.headers["Access-Control-Allow-Origin"]  = origin
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            resp.headers["Access-Control-Max-Age"]       = "600"
+        return resp
+
+    # ── legacy WiFi-transfer routes (LAN upload page) ─────────────────────────
+
+    @app.route("/")
+    def index():
+        return _HTML
+
+    @app.route("/upload", methods=["POST"])
+    def upload():
+        # The server now runs even while the storage lock is on — uploads
+        # would land in the RAM overlay and vanish, so refuse them here.
+        if _storage_locked():
+            return jsonify(status="error", reason="storage locked"), 423
+        f = request.files.get("file")
+        if not f:
+            return jsonify(status="error", reason="no file")
+        suffix = Path(f.filename).suffix.lower()
+        if suffix not in AUDIO_EXT:
+            return jsonify(status="skipped", reason="not audio")
+        dest = music_root / Path(f.filename).name
+        if dest.exists() and dest.stat().st_size > 0:
+            return jsonify(status="skipped", reason="exists")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        f.save(dest)
+        debouncer.schedule()
+        return jsonify(status="ok")
+
+    @app.route("/stats")
+    def stats():
+        try:
+            conn = _db()
+            row  = conn.execute("SELECT COUNT(*) AS n FROM tracks").fetchone()
+            conn.close()
+            return jsonify(tracks=row["n"] if row else 0)
+        except sqlite3.Error:
+            return jsonify(tracks=0)
+
+    # ── /api/v1 (authenticated JSON) ──────────────────────────────────────────
+
+    @app.get("/api/v1/status")
+    def api_status():
+        from musi.player import updater
+        counts = {"artists": 0, "albums": 0, "tracks": 0}
+        try:
+            conn = _db()
+            for key in counts:
+                row = conn.execute(f"SELECT COUNT(*) AS n FROM {key}").fetchone()
+                counts[key] = row["n"] if row else 0
+            conn.close()
+        except sqlite3.Error:
+            pass
+        try:
+            usage = shutil.disk_usage(music_root)
+            storage = {"total": usage.total, "free": usage.free}
+        except OSError:
+            storage = {"total": 0, "free": 0}
+        return jsonify(
+            version=updater.current_version(),
+            uptime_s=_uptime_s(),
+            storage=storage,
+            counts=counts,
+            storage_locked=_storage_locked(),
+        )
+
+    @app.get("/api/v1/albums")
+    def api_albums():
+        try:
+            conn = _db()
+            rows = conn.execute(
+                """
+                SELECT al.id, al.title, al.year, al.art_path,
+                       ar.name AS artist, COUNT(t.id) AS track_count
+                FROM albums al
+                JOIN artists ar ON ar.id = al.artist_id
+                LEFT JOIN tracks t ON t.album_id = al.id
+                GROUP BY al.id
+                ORDER BY ar.name COLLATE NOCASE, al.year, al.title COLLATE NOCASE
+                """
+            ).fetchall()
+            conn.close()
+        except sqlite3.Error:
+            rows = []
+        return jsonify(albums=[_album_json(r) for r in rows])
+
+    @app.get("/api/v1/albums/<int:album_id>")
+    def api_album(album_id: int):
+        try:
+            conn = _db()
+            album = conn.execute(
+                """
+                SELECT al.id, al.title, al.year, al.art_path,
+                       ar.name AS artist, COUNT(t.id) AS track_count
+                FROM albums al
+                JOIN artists ar ON ar.id = al.artist_id
+                LEFT JOIN tracks t ON t.album_id = al.id
+                WHERE al.id = ?
+                GROUP BY al.id
+                """,
+                (album_id,),
+            ).fetchone()
+            if not album or album["id"] is None:
+                conn.close()
+                return jsonify(error="not found"), 404
+            tracks = conn.execute(
+                """
+                SELECT id, title, track_number, disc_number, duration
+                FROM tracks WHERE album_id = ?
+                ORDER BY disc_number, track_number, title COLLATE NOCASE
+                """,
+                (album_id,),
+            ).fetchall()
+            conn.close()
+        except sqlite3.Error:
+            return jsonify(error="not found"), 404
+        return jsonify(**_album_json(album), tracks=[dict(t) for t in tracks])
+
+    @app.get("/api/v1/albums/<int:album_id>/art")
+    def api_album_art(album_id: int):
+        try:
+            conn = _db()
+            row = conn.execute(
+                "SELECT art_path FROM albums WHERE id = ?", (album_id,)
+            ).fetchone()
+            conn.close()
+        except sqlite3.Error:
+            row = None
+        if not row or not row["art_path"] or not Path(row["art_path"]).exists():
+            return jsonify(error="no art"), 404
+        return send_file(row["art_path"], max_age=3600)
+
+    return app
+
+
+def _album_json(row: sqlite3.Row) -> dict:
+    return {
+        "id":          row["id"],
+        "title":       row["title"],
+        "artist":      row["artist"],
+        "year":        row["year"],
+        "track_count": row["track_count"],
+        "art":         f"/api/v1/albums/{row['id']}/art" if row["art_path"] else None,
+    }

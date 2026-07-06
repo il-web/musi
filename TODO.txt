@@ -69,6 +69,22 @@ DONE
     - Status bar WiFi icon: signal arcs from /proc/net/wireless (no
       subprocess), red slash when down; player/net_status.py
 
+[x] API pack 1 — core (read-only)
+    - musi.api package (grown from wifi_transfer, which is gone): always-on
+      Flask server, port 8080, musi-api.service (install.sh + update.sh
+      step 2); old upload page stays at / (+ /upload now 423s while the
+      storage lock is on — the server no longer stops when locked)
+    - Bearer-token auth on /api/v1/* (token: ~/.local/share/musi/api-token,
+      0600; server re-reads per request so regenerate needs no restart)
+    - Settings -> API screen: URL, live service state, token, regenerate
+      (with confirm). WiFi Transfer screen = info screen now: URL + QR
+      (segno, new dep) + live "server running / N tracks" probe
+    - CORS allowlist: MUSI_API_CORS_ORIGINS env, default musiweb.base44.app
+    - GET /api/v1/status | /albums | /albums/{id} | /albums/{id}/art
+    - tests/test_api.py (12 tests, Flask test client)
+    - NOTE: legacy /, /upload, /stats stay tokenless (LAN-only until the
+      tunnel pack — pack 3 must revisit before exposing them)
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
@@ -76,17 +92,6 @@ Goal: musi website (moving base44 -> Vercel) browses + manages the library
 remotely. Library management only, NO playback control. Remote transport =
 Cloudflare Tunnel (needs a domain on a free Cloudflare account; must use
 the cloudflared-linux-arm build — armhf crashes on the Zero W's ARMv6).
-
-[ ] API pack 1 — core (read-only)
-    - New musi.api package grown from wifi_transfer/server.py; runs ALWAYS
-      as musi-api.service (port 8080); WiFi Transfer screen becomes a
-      "server info" screen (URL + QR), old upload page stays at /
-    - Bearer-token auth on everything (token in ~/.local/share/musi/
-      api-token; new Settings -> API screen: show/regenerate token)
-    - CORS allowlist for the site origin
-    - GET /api/v1/status (git version, statvfs storage, counts, lock state)
-    - GET /api/v1/albums, /albums/{id}, /albums/{id}/art
-    - install.sh mirror + update.sh step for the new service
 
 [ ] API pack 2 — writes
     - POST /upload (move existing logic), DELETE /albums/{id} and

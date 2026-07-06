@@ -240,9 +240,10 @@ sudo systemctl reload NetworkManager 2>/dev/null || true
 # ── 10. services + autostart ──────────────────────────────────────────────────
 say "[10/10] Enabling services + autostart"
 install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"
+install -m 0644 "$SCRIPT_DIR/pi/musi-api.service" "$HOME/.config/systemd/user/musi-api.service"
 loginctl enable-linger "$USER_NAME" 2>/dev/null || true
 systemctl --user daemon-reload
-systemctl --user enable mpd musi-bt-router mpris-proxy musi-ui 2>/dev/null || true
+systemctl --user enable mpd musi-bt-router mpris-proxy musi-ui musi-api 2>/dev/null || true
 sudo hostnamectl set-hostname musi 2>/dev/null || true
 sudo systemctl enable --now avahi-daemon 2>/dev/null || true
 

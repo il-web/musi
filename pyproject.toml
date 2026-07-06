@@ -13,6 +13,7 @@ dependencies = [
     "mutagen>=1.47.0",
     "Pillow>=10.0.0",
     "flask>=3.0.0",
+    "segno>=1.6.0",
 ]
 
 [project.optional-dependencies]

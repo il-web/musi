@@ -23,7 +23,7 @@ REPO="$(cd "$(dirname "$SELF")" && pwd)"
 STATE_DIR="$HOME/.local/share/musi"
 STATE="$STATE_DIR/update-level"
 
-LATEST_STEP=1
+LATEST_STEP=2
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -49,6 +49,14 @@ root_1() {
             "$BT_MAIN"
         systemctl restart bluetooth 2>/dev/null || true
     fi
+}
+
+# ── step 2: Device API pack (2026-07-06) ─────────────────────────────────────
+user_2() {
+    install -m 0644 "$REPO/pi/musi-api.service" "$HOME/.config/systemd/user/musi-api.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable --now musi-api 2>/dev/null || true
+    systemctl --user restart musi-api 2>/dev/null || true
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════
