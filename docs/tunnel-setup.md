@@ -8,6 +8,17 @@ anywhere. No port forwarding; the Pi dials out to Cloudflare.
 
 - A domain added to a **free Cloudflare account** (nameservers switched to
   Cloudflare and the zone shows *Active*).
+
+  Free-domain route (eu.org), in this order:
+  1. Add `<name>.eu.org` to Cloudflare first (Add a domain → Free). The
+     pending zone gets two assigned Cloudflare nameservers — note them.
+  2. Register at https://nic.eu.org, request the same domain, and enter
+     those two Cloudflare nameservers in the request's NS section.
+  3. Wait for eu.org's manual approval (days to weeks). When it lands,
+     the Cloudflare zone flips to Active ("Check nameservers" nudges it).
+
+  NOTE: `musiweb.base44.app` can NOT be used — it's base44's domain; the
+  zone would wait forever on a nameserver change only base44 could make.
 - The Pi online, running Device API pack 3 or later. That update installs
   `cloudflared` automatically; check with:
 
