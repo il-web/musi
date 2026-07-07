@@ -237,6 +237,25 @@ sudo systemctl reload NetworkManager 2>/dev/null || true
 # toggled from Settings -> Power on the device (raspi-config nonint
 # do_overlayfs, allowed via the sudoers rule above) and applies after reboot.
 
+# ── 9e. cloudflared (remote API tunnel — binary only) ─────────────────────────
+say "[9e] cloudflared (tunnel binary)"
+# Generic ARM build only: armhf/ARMv7 builds crash with "illegal instruction"
+# on the Zero W's ARMv6. Keep the version in sync with update.sh.
+CLOUDFLARED_VERSION="$(sed -n 's/^CLOUDFLARED_VERSION="\(.*\)"$/\1/p' "$SCRIPT_DIR/update.sh" | head -1)"
+CF_BIN=/usr/local/bin/cloudflared
+if [ -n "$CLOUDFLARED_VERSION" ] && { [ ! -x "$CF_BIN" ] || ! "$CF_BIN" --version 2>/dev/null | grep -q "$CLOUDFLARED_VERSION"; }; then
+    CF_TMP="$(mktemp)"
+    if curl -fsSL --retry 2 -o "$CF_TMP" \
+        "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-arm"; then
+        sudo install -m 0755 "$CF_TMP" "$CF_BIN"
+    else
+        echo "  !! cloudflared download failed — see docs/tunnel-setup.md later"
+    fi
+    rm -f "$CF_TMP"
+fi
+# The tunnel itself needs a one-time interactive setup (Cloudflare login,
+# domain DNS) — see docs/tunnel-setup.md. Nothing to enable here.
+
 # ── 10. services + autostart ──────────────────────────────────────────────────
 say "[10/10] Enabling services + autostart"
 install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"

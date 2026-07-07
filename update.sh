@@ -23,7 +23,12 @@ REPO="$(cd "$(dirname "$SELF")" && pwd)"
 STATE_DIR="$HOME/.local/share/musi"
 STATE="$STATE_DIR/update-level"
 
-LATEST_STEP=2
+LATEST_STEP=3
+
+# Pinned cloudflared for the remote tunnel. MUST be the generic ARM build:
+# armhf/ARMv7 builds die with "illegal instruction" on the Zero W's ARMv6
+# (cloudflared issue #1136). Bump deliberately after testing on-device.
+CLOUDFLARED_VERSION="2026.6.1"
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -57,6 +62,24 @@ user_2() {
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable --now musi-api 2>/dev/null || true
     systemctl --user restart musi-api 2>/dev/null || true
+}
+
+# ── step 3: Device API pack 3 — cloudflared binary (2026-07-07) ───────────────
+root_3() {
+    BIN=/usr/local/bin/cloudflared
+    if [ -x "$BIN" ] && "$BIN" --version 2>/dev/null | grep -q "$CLOUDFLARED_VERSION"; then
+        return 0
+    fi
+    URL="https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-arm"
+    if curl -fsSL --retry 2 -o "$BIN.tmp" "$URL"; then
+        install -m 0755 "$BIN.tmp" "$BIN"
+        rm -f "$BIN.tmp"
+        say "cloudflared $CLOUDFLARED_VERSION installed"
+    else
+        rm -f "$BIN.tmp"
+        say "!! cloudflared download failed (offline?) — tunnel setup can"
+        say "   install it later, see docs/tunnel-setup.md"
+    fi
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════

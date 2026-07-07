@@ -109,10 +109,19 @@ the cloudflared-linux-arm build — armhf crashes on the Zero W's ARMv6).
     - Fixed latent art.py crash: solid-colour covers made _extract_palette
       IndexError (quantize returns short palettes)
 
-[ ] API pack 3 — remote (Cloudflare Tunnel)
-    - PREREQ: Ilay buys/moves a domain onto Cloudflare (free plan)
-    - cloudflared linux-arm pinned version via update.sh root step;
-      named tunnel -> https://api.<domain>; docs + website env token
+[x] API pack 3 — remote (Cloudflare Tunnel) — code + docs side
+    - update.sh root step 3 / install.sh 9e: pinned cloudflared 2026.6.1,
+      generic linux-arm build ONLY (armhf = "illegal instruction" on ARMv6);
+      download failure warns but never blocks the update
+    - Legacy tokenless routes (/, /upload, /stats) are now double-locked
+      from the internet: tunnel ingress only forwards /api/* AND the app
+      404s any request carrying Cloudflare headers (Cf-Ray/CF-Connecting-IP)
+    - CORS origins also read from ~/.local/share/musi/api-origins (one per
+      line, read at service start) — site domain changes need no code edit
+    - pi/cloudflared-config.yml template + docs/tunnel-setup.md runbook
+    - STILL MANUAL (needs Ilay's domain on Cloudflare first):
+      cloudflared tunnel login / create musi / route dns / config +
+      service install — follow docs/tunnel-setup.md end to end
 
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
     6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)

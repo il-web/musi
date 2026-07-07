@@ -28,3 +28,7 @@ def art_dir() -> Path:
 
 def api_token_path() -> Path:
     return Path(os.environ.get("MUSI_API_TOKEN_PATH", _BASE / "api-token"))
+
+
+def api_origins_path() -> Path:
+    return Path(os.environ.get("MUSI_API_ORIGINS_PATH", _BASE / "api-origins"))

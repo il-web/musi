@@ -163,6 +163,33 @@ def test_upload_refused_while_storage_locked(client, monkeypatch):
     assert not (client.music_root / "locked.mp3").exists()
 
 
+# ── tunnel exposure (pack 3) ──────────────────────────────────────────────────
+
+def test_legacy_routes_hidden_from_tunnel(client):
+    """Requests through the Cloudflare Tunnel carry CF headers — the
+    tokenless legacy routes must 404 for them."""
+    cf = {"Cf-Ray": "8a1b2c3d4e5f0000-TLV"}
+    assert client.get("/", headers=cf).status_code == 404
+    assert client.get("/stats", headers=cf).status_code == 404
+    assert client.post("/upload", headers={"CF-Connecting-IP": "1.2.3.4"}, data={
+        "file": (io.BytesIO(b"x"), "z.mp3")}).status_code == 404
+    # the authenticated API is exactly what the tunnel is for
+    assert client.get("/api/v1/status",
+                      headers={**AUTH, **cf}).status_code == 200
+    # and plain LAN requests still get the legacy page
+    assert client.get("/").status_code == 200
+
+
+def test_cors_origins_file(client, tmp_path, monkeypatch):
+    from musi.api.server import _cors_origins
+    origins_file = tmp_path / "api-origins"
+    origins_file.write_text("# site origins\nhttps://musi.example/\n\n")
+    monkeypatch.setenv("MUSI_API_ORIGINS_PATH", str(origins_file))
+    origins = _cors_origins()
+    assert "https://musi.example" in origins          # trailing slash stripped
+    assert "# site origins" not in origins
+
+
 # ── authenticated writes (pack 2) ─────────────────────────────────────────────
 
 def _album_id(client):

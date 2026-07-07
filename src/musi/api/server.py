@@ -7,8 +7,9 @@ service; Settings → API on the device shows the URL and token.
 
 Auth: every ``/api/v1`` request needs ``Authorization: Bearer <token>``
 (token file: see musi.api.auth). The legacy ``/``, ``/upload`` and ``/stats``
-routes stay open — they are only reachable on the LAN until the Cloudflare
-Tunnel pack, which will revisit them.
+routes stay tokenless for LAN convenience; internet traffic can't reach them —
+the Cloudflare Tunnel ingress only forwards ``/api/*`` (see
+pi/cloudflared-config.yml) and ``_via_tunnel()`` 404s them as a backstop.
 """
 from __future__ import annotations
 
@@ -207,9 +208,30 @@ def _uptime_s() -> int:
 
 
 def _cors_origins() -> "set[str]":
+    """Allowed browser origins: built-in default + env + the api-origins file
+    (one origin per line; lets the site domain change without a unit edit)."""
     import os
     raw = os.environ.get("MUSI_API_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
-    return {o.strip() for o in raw.split(",") if o.strip()}
+    origins = {o.strip() for o in raw.split(",") if o.strip()}
+    try:
+        from musi.library.config import api_origins_path
+        for line in api_origins_path().read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                origins.add(line.rstrip("/"))
+    except OSError:
+        pass
+    return origins
+
+
+def _via_tunnel() -> bool:
+    """True when the request arrived through the Cloudflare Tunnel.
+    cloudflared talks to us on localhost, so the remote address can't tell
+    LAN from internet — but Cloudflare always adds these headers. The tunnel
+    ingress only forwards /api/* anyway (see pi/cloudflared-config.yml);
+    this is the in-app backstop for the legacy tokenless routes."""
+    return bool(request.headers.get("Cf-Ray")
+                or request.headers.get("CF-Connecting-IP"))
 
 
 # ── app factory ───────────────────────────────────────────────────────────────
@@ -240,6 +262,10 @@ def create_app(
     @app.before_request
     def _gate():
         if not request.path.startswith("/api/"):
+            # Legacy LAN-only routes (/, /upload, /stats) are tokenless —
+            # never serve them to internet traffic from the tunnel.
+            if _via_tunnel():
+                return jsonify(error="not found"), 404
             return None
         if request.method == "OPTIONS":       # CORS preflight carries no auth
             return app.make_default_options_response()
