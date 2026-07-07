@@ -29,6 +29,28 @@ anywhere. No port forwarding; the Pi dials out to Cloudflare.
 
 All commands below run on the Pi over SSH as the normal user.
 
+## Option A — dashboard flow (simpler, remote-managed)
+
+Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel (cloudflared).
+
+1. **Environment**: Debian → architecture **arm32** ("32-bit" is x86 — wrong).
+2. **Connector install**: the shown command dpkg-installs the *latest*
+   `cloudflared-linux-arm.deb`. If `/usr/local/bin/cloudflared` already
+   exists (our pinned install), skip the download and run only:
+
+   ```sh
+   sudo cloudflared service install <TOKEN-from-the-dashboard-command>
+   ```
+
+   If a fresh dpkg install crashes with "illegal instruction", remove it
+   and use the pinned binary the same way.
+3. **Public hostname**: `api.<domain>` → service `HTTP` → `localhost:8080`.
+   Path scoping is optional here — the app already 404s the tokenless
+   legacy routes for any request carrying Cloudflare headers.
+4. Jump to step 5 below ("Test") and then step 7 (website env).
+
+## Option B — CLI flow (locally-managed, config in the repo)
+
 ## 1. Authorize cloudflared
 
 ```sh
