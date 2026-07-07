@@ -3,7 +3,7 @@
 Grown from the old WiFi-transfer server: the drag-and-drop upload page still
 lives at ``/`` for LAN use, and ``/api/v1/*`` adds the authenticated JSON API
 the musi website talks to. Runs permanently as the ``musi-api`` systemd user
-service; the WiFi Transfer screen just shows this server's URL now.
+service; Settings → API on the device shows the URL and token.
 
 Auth: every ``/api/v1`` request needs ``Authorization: Bearer <token>``
 (token file: see musi.api.auth). The legacy ``/``, ``/upload`` and ``/stats``
@@ -175,6 +175,29 @@ def _storage_locked() -> bool:
     return hardening.overlay_active()
 
 
+def _locked_response():
+    return jsonify(
+        error="storage locked",
+        hint="Unlock in Settings → Power on the device, then reboot",
+    ), 423
+
+
+def _mpd_update() -> None:
+    """Ask MPD to refresh its own database after library file changes.
+    Best-effort: no MPD (dev machine) is fine — mpd.conf also has
+    auto_update, this just makes the refresh immediate."""
+    try:
+        from mpd import MPDClient
+        client = MPDClient()
+        client.timeout = 5
+        client.connect("127.0.0.1", 6600)
+        client.update()
+        client.close()
+        client.disconnect()
+    except Exception:
+        log.info("mpd db update skipped (no MPD?)")
+
+
 def _uptime_s() -> int:
     """Device uptime; falls back to server-process uptime off-Pi."""
     try:
@@ -221,11 +244,14 @@ def create_app(
         if request.method == "OPTIONS":       # CORS preflight carries no auth
             return app.make_default_options_response()
         supplied = request.headers.get("Authorization", "")
-        if supplied.startswith("Bearer ") and hmac.compare_digest(
+        if not (supplied.startswith("Bearer ") and hmac.compare_digest(
             supplied[7:].strip(), get_token()
-        ):
-            return None
-        return jsonify(error="unauthorized"), 401
+        )):
+            return jsonify(error="unauthorized"), 401
+        # Storage lock (read-only overlay root) — refuse every write
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and _storage_locked():
+            return _locked_response()
+        return None
 
     @app.after_request
     def _cors(resp):
@@ -244,12 +270,7 @@ def create_app(
     def index():
         return _HTML
 
-    @app.route("/upload", methods=["POST"])
-    def upload():
-        # The server now runs even while the storage lock is on — uploads
-        # would land in the RAM overlay and vanish, so refuse them here.
-        if _storage_locked():
-            return jsonify(status="error", reason="storage locked"), 423
+    def _handle_upload():
         f = request.files.get("file")
         if not f:
             return jsonify(status="error", reason="no file")
@@ -263,6 +284,16 @@ def create_app(
         f.save(dest)
         debouncer.schedule()
         return jsonify(status="ok")
+
+    @app.route("/upload", methods=["POST"])
+    def upload():
+        # The server now runs even while the storage lock is on — uploads
+        # would land in the RAM overlay and vanish, so refuse them here.
+        # (/api/v1 writes are blocked centrally in _gate; this legacy route
+        # bypasses that gate.)
+        if _storage_locked():
+            return _locked_response()
+        return _handle_upload()
 
     @app.route("/stats")
     def stats():
@@ -366,6 +397,153 @@ def create_app(
         if not row or not row["art_path"] or not Path(row["art_path"]).exists():
             return jsonify(error="no art"), 404
         return send_file(row["art_path"], max_age=3600)
+
+    # ── /api/v1 writes (auth + storage lock enforced in _gate) ────────────────
+
+    def _prune_orphans(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)")
+        conn.execute(
+            "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)")
+
+    def _unlink_art_files(*paths: "str | None") -> None:
+        """Delete art cache files (and the palette sidecar) inside art_dir only."""
+        for p in paths:
+            if not p:
+                continue
+            path = Path(p)
+            if path.parent != art_dir:
+                continue
+            path.unlink(missing_ok=True)
+            if path.name.endswith("_thumb.jpg"):
+                (art_dir / path.name.replace("_thumb.jpg", "_palette.json")
+                 ).unlink(missing_ok=True)
+
+    @app.post("/api/v1/upload")
+    def api_upload():
+        return _handle_upload()
+
+    @app.delete("/api/v1/tracks/<int:track_id>")
+    def api_delete_track(track_id: int):
+        conn = _db()
+        row = conn.execute(
+            "SELECT path FROM tracks WHERE id = ?", (track_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify(error="not found"), 404
+        Path(row["path"]).unlink(missing_ok=True)
+        conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+        _prune_orphans(conn)
+        conn.commit()
+        conn.close()
+        _mpd_update()
+        return jsonify(status="ok")
+
+    @app.delete("/api/v1/albums/<int:album_id>")
+    def api_delete_album(album_id: int):
+        conn = _db()
+        album = conn.execute(
+            "SELECT art_path, backdrop_path FROM albums WHERE id = ?",
+            (album_id,)).fetchone()
+        if not album:
+            conn.close()
+            return jsonify(error="not found"), 404
+        tracks = conn.execute(
+            "SELECT path FROM tracks WHERE album_id = ?", (album_id,)).fetchall()
+        for t in tracks:
+            Path(t["path"]).unlink(missing_ok=True)
+        conn.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
+        conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+        _prune_orphans(conn)
+        conn.commit()
+        conn.close()
+        _unlink_art_files(album["art_path"], album["backdrop_path"])
+        _mpd_update()
+        return jsonify(status="ok", removed_tracks=len(tracks))
+
+    @app.patch("/api/v1/tracks/<int:track_id>")
+    def api_patch_track(track_id: int):
+        from musi.library.tags import WRITABLE_TAGS, write_tags
+        changes = request.get_json(silent=True)
+        if not changes or not isinstance(changes, dict):
+            return jsonify(error="JSON body with fields to change required"), 400
+        unknown = set(changes) - set(WRITABLE_TAGS)
+        if unknown:
+            return jsonify(error=f"unknown fields: {', '.join(sorted(unknown))}",
+                           allowed=sorted(WRITABLE_TAGS)), 400
+        for field in ("year", "track_number"):
+            if field in changes:
+                try:
+                    changes[field] = int(changes[field])
+                except (TypeError, ValueError):
+                    return jsonify(error=f"{field} must be an integer"), 400
+
+        conn = _db()
+        row = conn.execute(
+            "SELECT path FROM tracks WHERE id = ?", (track_id,)).fetchone()
+        if not row or not Path(row["path"]).exists():
+            conn.close()
+            return jsonify(error="not found"), 404
+        try:
+            write_tags(Path(row["path"]), changes)
+        except Exception as exc:
+            conn.close()
+            return jsonify(error=f"tag write failed: {exc}"), 400
+
+        # Mirror simple fields into the DB right away so reads are fresh;
+        # artist/album regrouping is the rescan's job (file mtime changed).
+        if "title" in changes:
+            conn.execute("UPDATE tracks SET title = ? WHERE id = ?",
+                         (changes["title"], track_id))
+        if "track_number" in changes:
+            conn.execute("UPDATE tracks SET track_number = ? WHERE id = ?",
+                         (changes["track_number"], track_id))
+        conn.commit()
+        conn.close()
+        debouncer.schedule()
+        _mpd_update()
+        return jsonify(status="ok", changed=changes)
+
+    @app.put("/api/v1/albums/<int:album_id>/art")
+    def api_put_art(album_id: int):
+        from musi.library.art import override_art
+        # Only consult files/form for multipart — touching them for any other
+        # content type makes Flask consume the body and get_data() return b"".
+        if request.mimetype == "multipart/form-data":
+            f = request.files.get("file")
+            image_bytes = f.read() if f else b""
+        else:
+            image_bytes = request.get_data()
+        if not image_bytes:
+            return jsonify(error="image required (multipart 'file' or raw body)"), 400
+
+        conn = _db()
+        album = conn.execute(
+            """
+            SELECT al.title, ar.name AS artist
+            FROM albums al JOIN artists ar ON ar.id = al.artist_id
+            WHERE al.id = ?
+            """,
+            (album_id,)).fetchone()
+        if not album:
+            conn.close()
+            return jsonify(error="not found"), 404
+
+        # Same key the scanner uses (artists.name == the tags' album_artist),
+        # so we overwrite the exact cache files a rescan would reuse.
+        album_key = f"{album['artist']}::{album['title']}"
+        try:
+            thumb, backdrop, palette = override_art(image_bytes, art_dir, album_key)
+        except Exception:
+            conn.close()
+            return jsonify(error="invalid image"), 400
+        import json as _json
+        conn.execute(
+            "UPDATE albums SET art_path = ?, backdrop_path = ?, palette = ? WHERE id = ?",
+            (str(thumb), str(backdrop), _json.dumps(palette), album_id))
+        conn.commit()
+        conn.close()
+        return jsonify(status="ok", art=f"/api/v1/albums/{album_id}/art")
 
     return app
 

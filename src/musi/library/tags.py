@@ -60,6 +60,28 @@ def read_tags(path: Path) -> Optional[TrackTags]:
     )
 
 
+# Fields the device API may edit → mutagen "easy" tag keys
+WRITABLE_TAGS = {
+    "title":        "title",
+    "artist":       "artist",
+    "album":        "album",
+    "year":         "date",
+    "track_number": "tracknumber",
+}
+
+
+def write_tags(path: Path, changes: dict) -> None:
+    """Write a subset of WRITABLE_TAGS to the file. Raises on failure."""
+    audio = mutagen.File(path, easy=True)
+    if audio is None:
+        raise ValueError("unsupported audio format")
+    if audio.tags is None:
+        audio.add_tags()
+    for field, value in changes.items():
+        audio[WRITABLE_TAGS[field]] = [str(value)]
+    audio.save()
+
+
 def extract_embedded_art(path: Path) -> Optional[bytes]:
     """Return raw image bytes from embedded album art, or None."""
     try:

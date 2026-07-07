@@ -67,6 +67,35 @@ def process_art(
     return thumb_path, backdrop_path, palette
 
 
+def override_art(
+    image_bytes: bytes,
+    art_dir: Path,
+    album_key: str,
+) -> tuple[Path, Path, list[str]]:
+    """Replace an album's cached art with a user-supplied image.
+
+    Overwrites the slug-addressed cache files. A rescan treats existing cache
+    files as authoritative (process_art returns them without re-extracting),
+    so the override survives rescans — even if the album row is recreated.
+
+    Raises on an unreadable image.
+    """
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    art_dir.mkdir(parents=True, exist_ok=True)
+
+    slug          = hashlib.md5(album_key.encode()).hexdigest()[:16]
+    thumb_path    = art_dir / f"{slug}_thumb.jpg"
+    backdrop_path = art_dir / f"{slug}_backdrop.jpg"
+    palette_path  = art_dir / f"{slug}_palette.json"
+
+    palette = _extract_palette(img)
+    _save_thumb(img, thumb_path)
+    _save_backdrop(img, backdrop_path, blur=True)
+    palette_path.write_text(json.dumps(palette))
+
+    return thumb_path, backdrop_path, palette
+
+
 # ── source acquisition ────────────────────────────────────────────────────────
 
 def _get_source_image(audio_path: Path) -> Optional[Image.Image]:
@@ -125,6 +154,8 @@ def _extract_palette(img: Image.Image) -> list[str]:
     small     = img.resize((64, 64), Image.LANCZOS)
     quantized = small.quantize(colors=PALETTE_N, method=Image.Quantize.MEDIANCUT)
     raw       = quantized.getpalette()[:PALETTE_N * 3]
+    while len(raw) < PALETTE_N * 3:   # low-colour covers yield short palettes
+        raw += raw[-3:]
     return [
         f"#{raw[i*3]:02x}{raw[i*3+1]:02x}{raw[i*3+2]:02x}"
         for i in range(PALETTE_N)

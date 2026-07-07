@@ -93,12 +93,21 @@ remotely. Library management only, NO playback control. Remote transport =
 Cloudflare Tunnel (needs a domain on a free Cloudflare account; must use
 the cloudflared-linux-arm build — armhf crashes on the Zero W's ARMv6).
 
-[ ] API pack 2 — writes
-    - POST /upload (move existing logic), DELETE /albums/{id} and
-      /tracks/{id} (files + DB + mpd db_update), PATCH /tracks/{id}
-      (mutagen tag write + rescan), PUT /albums/{id}/art (art override
-      that survives rescan — check art.py extraction order)
-    - All writes return 423 while Storage lock is on
+[x] API pack 2 — writes  (+ WiFi Transfer button removed from Home)
+    - POST /api/v1/upload (shared logic with legacy /upload, token-gated),
+      DELETE /albums/{id} (files + rows + art cache) and /tracks/{id},
+      PATCH /tracks/{id} (tags.write_tags via mutagen easy; title/artist/
+      album/year/track_number; title+track_number mirrored to DB at once,
+      the rest lands on the debounced rescan), PUT /albums/{id}/art
+    - Art override = overwrite the slug-addressed cache files (process_art
+      treats existing cache as authoritative) → survives even force rescans
+      and album-row recreation; verified live with a forced rescan
+    - All /api/v1 writes 423 centrally while Storage lock is on; MPD
+      db update after mutations (best-effort, auto_update also covers it)
+    - Home screen: WiFi Transfer entry + screens/usb.py deleted (server is
+      always-on; URL/token live in Settings -> API)
+    - Fixed latent art.py crash: solid-colour covers made _extract_palette
+      IndexError (quantize returns short palettes)
 
 [ ] API pack 3 — remote (Cloudflare Tunnel)
     - PREREQ: Ilay buys/moves a domain onto Cloudflare (free plan)

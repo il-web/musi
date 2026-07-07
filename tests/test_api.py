@@ -13,6 +13,9 @@ TOKEN  = "test-token"
 ORIGIN = "https://site.example"
 AUTH   = {"Authorization": f"Bearer {TOKEN}"}
 
+# A minimal but valid MPEG1 Layer3 stream mutagen can parse and tag
+_MP3_BYTES = (b"\xff\xfb\x10\xc0" + b"\x00" * 100) * 20
+
 
 @pytest.fixture
 def client(tmp_path):
@@ -24,18 +27,21 @@ def client(tmp_path):
 
     conn = open_db(db)
     run_migrations(conn)
-    art_file = art / "thumb.jpg"
+    art_file = art / "aaaa_thumb.jpg"
     art_file.write_bytes(b"\xff\xd8\xff-fake-jpeg")
+    (art / "aaaa_palette.json").write_text("[]")
     artist = conn.execute(
         "INSERT INTO artists (name) VALUES ('Artist')").lastrowid
     album = conn.execute(
         "INSERT INTO albums (artist_id, title, year, art_path) VALUES (?,?,?,?)",
         (artist, "Album", 2001, str(art_file))).lastrowid
     for n, title in enumerate(("One", "Two"), start=1):
+        track_file = music / f"{title.lower()}.mp3"
+        track_file.write_bytes(_MP3_BYTES)
         conn.execute(
             "INSERT INTO tracks (album_id, artist_id, path, title, track_number, duration)"
             " VALUES (?,?,?,?,?,?)",
-            (album, artist, f"a/{n}.mp3", title, n, 60.0 + n))
+            (album, artist, str(track_file), title, n, 60.0 + n))
     conn.commit()
     conn.close()
 
@@ -44,7 +50,8 @@ def client(tmp_path):
                      cors_origins={ORIGIN})
     app.testing = True
     c = app.test_client()
-    c.music_root = music          # for the upload test
+    c.music_root = music          # for upload/delete assertions
+    c.art_dir    = art
     return c
 
 
@@ -154,3 +161,134 @@ def test_upload_refused_while_storage_locked(client, monkeypatch):
     })
     assert r.status_code == 423
     assert not (client.music_root / "locked.mp3").exists()
+
+
+# ── authenticated writes (pack 2) ─────────────────────────────────────────────
+
+def _album_id(client):
+    return client.get("/api/v1/albums", headers=AUTH).get_json()["albums"][0]["id"]
+
+
+def _track_ids(client):
+    aid = _album_id(client)
+    d = client.get(f"/api/v1/albums/{aid}", headers=AUTH).get_json()
+    return aid, [t["id"] for t in d["tracks"]]
+
+
+def test_api_upload(client):
+    r = client.post("/api/v1/upload", headers=AUTH, data={
+        "file": (io.BytesIO(_MP3_BYTES), "three.mp3"),
+    })
+    assert r.get_json()["status"] == "ok"
+    assert (client.music_root / "three.mp3").exists()
+    # and it is token-gated, unlike the legacy route
+    assert client.post("/api/v1/upload", data={
+        "file": (io.BytesIO(b"x"), "four.mp3"),
+    }).status_code == 401
+
+
+def test_delete_track(client):
+    _, (tid, _tid2) = _track_ids(client)
+    assert client.delete(f"/api/v1/tracks/{tid}",
+                         headers=AUTH).get_json()["status"] == "ok"
+    assert not (client.music_root / "one.mp3").exists()
+    assert (client.music_root / "two.mp3").exists()          # untouched
+    _, remaining = _track_ids(client)
+    assert remaining == [_tid2]
+    assert client.delete(f"/api/v1/tracks/{tid}",
+                         headers=AUTH).status_code == 404    # already gone
+
+
+def test_delete_album(client):
+    aid = _album_id(client)
+    r = client.delete(f"/api/v1/albums/{aid}", headers=AUTH)
+    assert r.get_json() == {"status": "ok", "removed_tracks": 2}
+    assert not (client.music_root / "one.mp3").exists()
+    assert not (client.music_root / "two.mp3").exists()
+    assert not (client.art_dir / "aaaa_thumb.jpg").exists()      # art cache
+    assert not (client.art_dir / "aaaa_palette.json").exists()   # + sidecar
+    assert client.get("/api/v1/albums", headers=AUTH).get_json()["albums"] == []
+    assert client.delete(f"/api/v1/albums/{aid}", headers=AUTH).status_code == 404
+
+
+def test_patch_track(client):
+    from musi.library.tags import read_tags
+    _, (tid, _) = _track_ids(client)
+    r = client.patch(f"/api/v1/tracks/{tid}", headers=AUTH,
+                     json={"title": "Renamed", "year": 2020, "track_number": 9})
+    assert r.get_json()["status"] == "ok"
+    tags = read_tags(client.music_root / "one.mp3")   # real file tags changed
+    assert (tags.title, tags.year, tags.track_number) == ("Renamed", 2020, 9)
+    _, tracks = _track_ids(client)                    # DB mirrored immediately
+    d = client.get(f"/api/v1/albums/{_album_id(client)}", headers=AUTH).get_json()
+    renamed = [t for t in d["tracks"] if t["id"] == tid][0]
+    assert renamed["title"] == "Renamed"
+    assert renamed["track_number"] == 9
+
+
+def test_patch_track_validation(client):
+    _, (tid, _) = _track_ids(client)
+    assert client.patch(f"/api/v1/tracks/{tid}", headers=AUTH,
+                        json={"genre": "x"}).status_code == 400
+    assert client.patch(f"/api/v1/tracks/{tid}", headers=AUTH,
+                        json={"year": "soon"}).status_code == 400
+    assert client.patch(f"/api/v1/tracks/{tid}", headers=AUTH).status_code == 400
+    assert client.patch("/api/v1/tracks/999", headers=AUTH,
+                        json={"title": "x"}).status_code == 404
+
+
+def test_put_album_art(client):
+    from PIL import Image
+    aid = _album_id(client)
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (200, 30, 90)).save(buf, "PNG")
+    r = client.put(f"/api/v1/albums/{aid}/art", headers=AUTH,
+                   data=buf.getvalue(), content_type="image/png")
+    assert r.get_json()["status"] == "ok"
+    art = client.get(f"/api/v1/albums/{aid}/art", headers=AUTH)
+    assert art.status_code == 200
+    assert art.data.startswith(b"\xff\xd8\xff")       # regenerated JPEG thumb
+
+    # curl --data-binary default content type must not eat the body
+    r = client.put(f"/api/v1/albums/{aid}/art", headers=AUTH,
+                   data=buf.getvalue(),
+                   content_type="application/x-www-form-urlencoded")
+    assert r.get_json()["status"] == "ok"
+
+    assert client.put(f"/api/v1/albums/{aid}/art", headers=AUTH,
+                      data=b"not an image").status_code == 400
+    assert client.put("/api/v1/albums/999/art", headers=AUTH,
+                      data=buf.getvalue()).status_code == 404
+
+
+def test_art_override_survives_rescan(client, tmp_path):
+    """A rescan must reuse (not regenerate) the overridden cache files."""
+    from musi.library.art import override_art, process_art
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (10, 200, 40)).save(buf, "PNG")
+    thumb, _, _ = override_art(buf.getvalue(), client.art_dir, "Artist::Album")
+    override_bytes = thumb.read_bytes()
+    # what _get_or_create_album calls when recreating the row on rescan
+    thumb2, _, _ = process_art(client.music_root / "one.mp3",
+                               client.art_dir, "Artist::Album")
+    assert thumb2 == thumb
+    assert thumb2.read_bytes() == override_bytes
+
+
+def test_all_writes_blocked_while_locked(client, monkeypatch):
+    monkeypatch.setattr("musi.api.server._storage_locked", lambda: True)
+    aid = _album_id(client)
+    _, (tid, _) = _track_ids(client)
+    assert client.post("/api/v1/upload", headers=AUTH, data={
+        "file": (io.BytesIO(b"x"), "z.mp3")}).status_code == 423
+    assert client.delete(f"/api/v1/tracks/{tid}", headers=AUTH).status_code == 423
+    assert client.delete(f"/api/v1/albums/{aid}", headers=AUTH).status_code == 423
+    assert client.patch(f"/api/v1/tracks/{tid}", headers=AUTH,
+                        json={"title": "x"}).status_code == 423
+    assert client.put(f"/api/v1/albums/{aid}/art", headers=AUTH,
+                      data=b"img").status_code == 423
+    # reads still work while locked
+    assert client.get("/api/v1/albums", headers=AUTH).status_code == 200
+    # and nothing was actually deleted
+    assert (client.music_root / "one.mp3").exists()

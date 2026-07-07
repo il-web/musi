@@ -20,7 +20,6 @@ MENU = [
     "Search",
     "Recently Played",
     "Most Played",
-    "WiFi Transfer",
     "Settings",
 ]
 
@@ -198,9 +197,6 @@ class HomeScreen(Screen):
         elif label == "Most Played":
             from musi.player.screens.history import HistoryScreen
             self.app.push(HistoryScreen(self.app, mode="most"))
-        elif label == "WiFi Transfer":
-            from musi.player.screens.usb import USBScreen
-            self.app.push(USBScreen(self.app))
         elif label == "Settings":
             from musi.player.screens.settings import SettingsScreen
             self.app.push(SettingsScreen(self.app))
@@ -253,18 +249,6 @@ def _draw_item_icon(surface, index, cx, cy, colour):
     elif index == 4: # Most Played
         pygame.draw.lines(surface, colour, False, [(cx - 5, cy + 5), (cx - 2, cy + 2), (cx + 1, cy + 5), (cx + 5, cy - 1)], 2)
         pygame.draw.polygon(surface, colour, [(cx + 2, cy - 1), (cx + 5, cy - 4), (cx + 5, cy + 2)])
-    elif index == 5: # WiFi Transfer — WiFi arcs
-        import math
-        for r, a in [(10, 0.55), (6, 0.6), (2, 0.0)]:
-            if r == 2:
-                pygame.draw.circle(surface, colour, (cx, cy + 4), 2)
-            else:
-                pts = [
-                    (cx + int(r * math.cos(math.pi * 0.5 + math.pi * a * t / 20)),
-                     cy + 4 - int(r * math.sin(math.pi * 0.5 + math.pi * a * t / 20)))
-                    for t in range(-20, 21)
-                ]
-                pygame.draw.lines(surface, colour, False, pts, 2)
-    elif index == 6: # Settings — gear
+    elif index == 5: # Settings — gear
         pygame.draw.circle(surface, colour, (cx, cy), 7, 2)
         pygame.draw.circle(surface, colour, (cx, cy), 3)
