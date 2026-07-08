@@ -1,10 +1,9 @@
-"""Browse screen — Artists → Albums → Tracks hierarchical browser."""
+"""Browse screen — Artists → Albums browser (albums open AlbumScreen)."""
 from __future__ import annotations
 
 import bisect
 import math
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 import pygame
 
@@ -39,9 +38,8 @@ def _letter_key(name: str) -> str:
 @dataclass
 class _Item:
     label:    str
-    sub:      str = ""    # subtitle — year (album) or track-number (track)
+    sub:      str = ""    # subtitle — year (album)
     row_id:   int = 0
-    path:     str = ""
     art_path: str = ""
 
 
@@ -52,8 +50,6 @@ class BrowseScreen(ListScreen):
         self._level:       int         = 0
         self._artist_id:   int         = 0
         self._artist_name: str         = ""
-        self._album_id:    int         = 0
-        self._album_name:  str         = ""
         self._items:       list[_Item] = []
 
         # A-Z rail state (artists level)
@@ -83,13 +79,7 @@ class BrowseScreen(ListScreen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
 
         # ── breadcrumb header ─────────────────────────────────────────────────
-        if self._level == 0:
-            crumb = "Browse"
-        elif self._level == 1:
-            crumb = self._artist_name
-        else:
-            crumb = self._album_name
-
+        crumb = "Browse" if self._level == 0 else self._artist_name
         hdr_s = theme.render(crumb, 14, theme.WHITE, bold=True, max_width=196)
         surface.blit(hdr_s, (14, 26))
 
@@ -124,43 +114,15 @@ class BrowseScreen(ListScreen):
                     self._draw_album_cell(surface, cx, y, cw, idx)
             return
 
+        # Artists — name row + chevron
         item = self._items[di]
         sel  = (di == self._sel)
-        # artists rows end short of the A-Z rail
-        row_w = 284 if self._level == 0 else 298
-        rect = pygame.Rect(10, y, row_w, ITEM_H - 3)
+        rect = pygame.Rect(10, y, 284, ITEM_H - 3)   # ends short of the rail
 
         pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
                          rect, border_radius=7)
-
-        col = theme.WHITE
-
-        if self._level == 2:
-            # Tracks — show track number badge
-            bx, bcy = 16, y + (ITEM_H - 3) // 2
-            pygame.draw.rect(surface, (50, 50, 68) if not sel else (80, 80, 110),
-                             (bx, bcy - 12, 28, 24), border_radius=4)
-            num_s = theme.render(
-                item.sub.zfill(2) if item.sub else "·",
-                10,
-                theme.WHITE if sel else theme.DIM,
-            )
-            surface.blit(num_s, num_s.get_rect(center=(bx + 14, bcy)))
-
-            lbl_s = theme.render(item.label, 13, col, bold=sel, max_width=226)
-            surface.blit(lbl_s, (50, y + (ITEM_H - 3 - lbl_s.get_height()) // 2))
-
-            # play icon on right
-            icons.draw_play(surface, 302, bcy, theme.WHITE if sel else theme.DIM)
-            return   # no chevron for tracks
-
-        else:
-            # Artists — name only
-            lbl_s = theme.render(item.label, 13, col, bold=sel, max_width=250)
-            surface.blit(lbl_s,
-                         (16, y + (ITEM_H - 3 - lbl_s.get_height()) // 2))
-
-        # chevron (artists)
+        lbl_s = theme.render(item.label, 13, theme.WHITE, bold=sel, max_width=250)
+        surface.blit(lbl_s, (16, y + (ITEM_H - 3 - lbl_s.get_height()) // 2))
         icons.draw_chevron_right(surface, rect.right - 14, y + (ITEM_H - 3) // 2,
                                  theme.WHITE if sel else theme.DIM)
 
@@ -266,26 +228,16 @@ class BrowseScreen(ListScreen):
         return super().handle_touch(x, y)
 
     def handle_long_press(self, x: int, y: int) -> bool:
-        if self._level == 0 or not (LIST_Y <= y < NAV_Y - 24):
+        if self._level != 1 or not (LIST_Y <= y < NAV_Y - 24):
             return False
         row_idx = self._klist.index_at(y - LIST_Y)
-        if self._level == 1:
-            col = 0 if x < 160 else 1
-            di = row_idx * 2 + col
-        else:
-            di = row_idx
-
+        col = 0 if x < 160 else 1
+        di = row_idx * 2 + col
         if not (0 <= di < len(self._items)):
             return False
         self._sel = di
-        item = self._items[di]
-        if self._level == 2:
-            self._open_track_menu(item)
-        else:
-            self._open_album_menu(item)
+        self._open_album_menu(self._items[di])
         return True
-
-
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         # In the album grid UP/DOWN move by a row (2), PREV/NEXT by a column.
@@ -304,10 +256,6 @@ class BrowseScreen(ListScreen):
             self._clamp_scroll()
         elif button == Button.SELECT:
             self._select()
-        elif button == Button.PLAY_PAUSE:
-            # From track list: play selected track
-            if self._level == 2 and self._items:
-                self._play_from(self._sel)
         elif button == Button.BACK:
             self._go_back()
 
@@ -324,13 +272,8 @@ class BrowseScreen(ListScreen):
             self._sel         = 0
             self._load_albums(item.row_id)
         elif self._level == 1:
-            self._album_id   = item.row_id
-            self._album_name = item.label
-            self._level      = 2
-            self._sel        = 0
-            self._load_tracks(item.row_id)
-        elif self._level == 2:
-            self._play_from(self._sel)
+            from musi.player.screens.album import AlbumScreen
+            self.app.push(AlbumScreen(self.app, item.row_id))
 
     def _go_back(self) -> None:
         if self._level == 0:
@@ -339,28 +282,8 @@ class BrowseScreen(ListScreen):
             self._level = 0
             self._sel   = 0
             self._load_artists()
-        elif self._level == 2:
-            self._level = 1
-            self._sel   = 0
-            self._load_albums(self._artist_id)
 
-    def _play_from(self, idx: int) -> None:
-        paths = [item.path for item in self._items]
-        self.app.mpd.play_paths(paths, start_index=idx)
-        self.app.request_poll()
-        from musi.player.screens.now_playing import NowPlayingScreen
-        self.app.push(NowPlayingScreen(self.app))
-
-    # ── long-press menus ──────────────────────────────────────────────────────
-
-    def _open_track_menu(self, item: _Item) -> None:
-        from musi.player.screens.context_menu import ContextMenuScreen
-        idx = self._sel
-        self.app.push(ContextMenuScreen(self.app, item.label, [
-            ("Play now",     lambda: self._play_from(idx)),
-            ("Play next",    lambda: self._queue([item.path], next_up=True)),
-            ("Add to queue", lambda: self._queue([item.path], next_up=False)),
-        ]))
+    # ── long-press menu (album grid) ──────────────────────────────────────────
 
     def _open_album_menu(self, item: _Item) -> None:
         from musi.player.screens.context_menu import ContextMenuScreen
@@ -426,32 +349,3 @@ class BrowseScreen(ListScreen):
             for r in rows
         ]
         self._klist.set_count(math.ceil(len(self._items) / 2), reset=True)
-
-    def _load_tracks(self, album_id: int) -> None:
-        self.item_h = ITEM_H
-        self._klist.item_h = ITEM_H
-        rows = self.app.db.execute(
-            """SELECT path, title, track_number
-               FROM tracks
-               WHERE album_id = ?
-               ORDER BY disc_number, track_number""",
-            (album_id,),
-        ).fetchall()
-        self._items = [
-            _Item(
-                label = r["title"] or Path(r["path"]).stem,
-                sub   = str(r["track_number"]) if r["track_number"] else "",
-                path  = r["path"],
-            )
-            for r in rows
-        ]
-        self._klist.set_count(len(self._items), reset=True)
-
-
-
-
-
-
-
-
-
