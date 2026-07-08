@@ -85,6 +85,14 @@ DONE
     - NOTE: legacy /, /upload, /stats stay tokenless (LAN-only until the
       tunnel pack — pack 3 must revisit before exposing them)
 
+[x] Album screen pack
+    - Browse album tap opens an Apple-Music-style album page: 120px art,
+      title, artist · year, "N songs · M min", Play (palette accent) +
+      Shuffle buttons, track list below (screens/album.py)
+    - Play = shuffle off + track 1; Shuffle = random on + random start;
+      both open Now Playing; mpd_client.set_shuffle added
+    - Browse level-2 track list removed (AlbumScreen replaces it)
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
