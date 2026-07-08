@@ -204,6 +204,10 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    def set_shuffle(self, on: bool) -> None:
+        """Set MPD random mode explicitly (album screen Play/Shuffle)."""
+        self._cmd(lambda: self._client.random(1 if on else 0))
+
     def toggle_repeat(self) -> None:
         if not self._ensure():
             return
