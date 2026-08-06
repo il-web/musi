@@ -186,8 +186,8 @@ class HomeScreen(Screen):
             from musi.player.screens.now_playing import NowPlayingScreen
             self.app.push(NowPlayingScreen(self.app))
         elif label == "Browse Library":
-            from musi.player.screens.browse import BrowseScreen
-            self.app.push(BrowseScreen(self.app))
+            from musi.player.screens.music import MusicScreen
+            self.app.push(MusicScreen(self.app))
         elif label == "Search":
             from musi.player.screens.search import SearchScreen
             self.app.push(SearchScreen(self.app))
