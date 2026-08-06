@@ -93,6 +93,30 @@ DONE
       both open Now Playing; mpd_client.set_shuffle added
     - Browse level-2 track list removed (AlbumScreen replaces it)
 
+[x] Launcher carousel pack  (plan: docs/superpowers/plans/
+    2026-08-05-launcher-carousel.md on the dev machine)
+    - iPod-style launcher replaces the six-row home menu: one 118px
+      gradient tile per page (Music, Settings, Clock, Sleep), swiped
+      horizontally, live subtitles, page dots (screens/launcher.py);
+      home.py deleted, LauncherScreen is the stack root
+    - Carousel widget: finger-tracking page strip, velocity snap, wraps
+      (widgets.py) — shaped like KineticList so both gestures tune alike
+    - Persistent 44px mini now-playing bar at y436 on every screen except
+      Now Playing and Search/WiFi (keyboard owns those pixels); shared
+      module-level art/text caches (minibar.py)
+    - Music is a tab host over Browse/Search/Recent/Most; the tab strip
+      becomes a "‹ artist" back row when Browse drills into an album
+      (screens/music.py); list screens now take an injected content rect
+    - New Clock app (no seconds, NTP-sync hint) and Sleep app (replaces
+      the Settings sleep-timer context menu; Settings row dropped)
+    - D-pad-era nav hints removed from browse/history/settings/album
+    - scripts/shoot_launcher.py renders all 11 frames headless
+    - commits 69191ae 19e3024 a1ac7bd 1039814 76cb7a5 660ec17 85f64cd
+      72fe354 7b47a4e ade7249 — app code only, no install.sh/update.sh step
+    - STILL NEEDS an on-device check after OTA: the swipe feel at 30 FPS
+      over SPI. If it drags, the knobs are Carousel.SNAP_S (shorter =
+      snappier) and Carousel.FLING_VEL (lower = easier to flick).
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

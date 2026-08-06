@@ -5,14 +5,14 @@ import random
 
 import pygame
 
-from musi.player import art_cache, audio_detect, icons, statusbar, theme
+from musi.player import art_cache, audio_detect, icons, minibar, statusbar, theme
 from musi.player.input import Button
 from musi.player.list_screen import ListScreen
 from musi.player.mpd_client import PlayerStatus
 
 ITEM_H = 48
 LIST_Y = 264
-NAV_Y  = 456
+NAV_Y  = minibar.BAR_Y
 
 ART_SIZE = 120
 ART_Y    = 34
@@ -43,7 +43,6 @@ class AlbumScreen(ListScreen):
         self._art:  pygame.Surface | None = None
 
         # static surfaces (lazy)
-        self._nav_surf:   pygame.Surface | None = None
         self._title_surf: pygame.Surface | None = None
         self._sub_surf:   pygame.Surface | None = None
         self._meta_surf:  pygame.Surface | None = None
@@ -87,8 +86,6 @@ class AlbumScreen(ListScreen):
     # ── draw ──────────────────────────────────────────────────────────────────
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
-        if self._nav_surf is None:
-            self._nav_surf = theme.render("Enter = play   Esc = back", 10, theme.WHITE)
         if self._title_surf is None:
             self._title_surf = theme.render(self._album_title, 15, theme.WHITE,
                                             bold=True, max_width=300)
@@ -132,11 +129,12 @@ class AlbumScreen(ListScreen):
 
         # ── track list ────────────────────────────────────────────────────────
         self.draw_list_viewport(surface, len(self._tracks))
+
         if not self._tracks:
             msg = theme.render("No tracks", 12, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=LIST_Y + 40))
 
-        surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
+        minibar.draw(surface, self.app, status)
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         t   = self._tracks[di]
@@ -159,6 +157,15 @@ class AlbumScreen(ListScreen):
     # ── input ─────────────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
+        zone = minibar.hit(x, y)
+        if zone == "toggle":
+            self.app.toggle_play()
+            return None
+        if zone == "open":
+            from musi.player.screens.now_playing import NowPlayingScreen
+            self.app.push(NowPlayingScreen(self.app))
+            return None
+
         if PLAY_RECT.collidepoint(x, y):
             self._play_album(shuffle=False)
             return None

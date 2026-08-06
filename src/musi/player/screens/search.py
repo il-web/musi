@@ -16,12 +16,9 @@ from musi.player.widgets import draw_scrollbar
 
 # ── layout constants ──────────────────────────────────────────────────────────
 BAR_H   = 26          # status bar height (matches statusbar.BAR_H)
-BOX_Y   = BAR_H + 4  # search box top
 BOX_H   = 36          # search box height
-LIST_Y  = BOX_Y + BOX_H + 4   # 70 — first result top
 ITEM_H  = 54          # height per result row
 KB_TOP  = 316         # on-screen keyboard docks here; results fill above it
-MAX_VIS = (KB_TOP - LIST_Y) // ITEM_H   # visible result rows above the keyboard
 
 _CURSOR_BLINK = 0.55   # seconds per blink half-cycle
 
@@ -37,8 +34,11 @@ class _Result:
 class SearchScreen(ListScreen):
     animates = True   # cursor blink + keyboard — keep responsive, no sleep
 
-    def __init__(self, app) -> None:
-        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=KB_TOP)
+    def __init__(self, app, top_y: int = BAR_H) -> None:
+        self.box_y  = top_y + 4
+        self.list_y = self.box_y + BOX_H + 4
+        super().__init__(app, item_h=ITEM_H, list_y=self.list_y, nav_y=KB_TOP)
+        self.max_vis = (KB_TOP - self.list_y) // ITEM_H
         self._query:   str           = ""
         self._results: list[_Result] = []
         self._enter_t: float         = 0.0
@@ -82,17 +82,17 @@ class SearchScreen(ListScreen):
         if y >= KB_TOP:                       # tap on the on-screen keyboard
             self._on_key(self._kb.key_at(x, y))
             return None
-        if LIST_Y <= y < KB_TOP and not self._tap.pending:   # tap a result
-            di = self._klist.index_at(y - LIST_Y)
+        if self.list_y <= y < KB_TOP and not self._tap.pending:   # tap a result
+            di = self._klist.index_at(y - self.list_y)
             if 0 <= di < len(self._results):
                 self._sel = di                # highlight flashes, then plays
                 self._tap.set(self._play_selected)
         return None
 
     def handle_long_press(self, x: int, y: int) -> bool:
-        if not (LIST_Y <= y < KB_TOP):
+        if not (self.list_y <= y < KB_TOP):
             return False
-        di = self._klist.index_at(y - LIST_Y)
+        di = self._klist.index_at(y - self.list_y)
         if not (0 <= di < len(self._results)):
             return False
         self._sel = di
@@ -165,12 +165,12 @@ class SearchScreen(ListScreen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
 
         # ── search box ────────────────────────────────────────────────────────
-        box_rect = pygame.Rect(8, BOX_Y, 304, BOX_H)
+        box_rect = pygame.Rect(8, self.box_y, 304, BOX_H)
         pygame.draw.rect(surface, (28, 28, 42), box_rect, border_radius=6)
         pygame.draw.rect(surface, theme.ACCENT, box_rect, 1, border_radius=6)
 
         # search icon (magnifier)
-        _magnifier(surface, 22, BOX_Y + BOX_H // 2, theme.DIM)
+        _magnifier(surface, 22, self.box_y + BOX_H // 2, theme.DIM)
 
         if self._query:
             # cursor blink
@@ -178,10 +178,10 @@ class SearchScreen(ListScreen):
             show_cursor = int(t / _CURSOR_BLINK) % 2 == 0
             display_text = self._query + ("|" if show_cursor else " ")
             txt_s = theme.render(display_text, 12, theme.WHITE, max_width=268)
-            surface.blit(txt_s, (38, BOX_Y + (BOX_H - txt_s.get_height()) // 2))
+            surface.blit(txt_s, (38, self.box_y + (BOX_H - txt_s.get_height()) // 2))
         else:
             surface.blit(self._ph_surf,
-                         (38, BOX_Y + (BOX_H - self._ph_surf.get_height()) // 2))
+                         (38, self.box_y + (BOX_H - self._ph_surf.get_height()) // 2))
 
         # ── results / idle state ──────────────────────────────────────────────
         if not self._results and self._query:
@@ -199,7 +199,7 @@ class SearchScreen(ListScreen):
             n    = len(self._results)
             word = "result" if n == 1 else "results"
             cnt_s = theme.render(f"{n} {word}", 10, theme.DIM)
-            surface.blit(cnt_s, cnt_s.get_rect(right=310, y=BOX_Y + 2))
+            surface.blit(cnt_s, cnt_s.get_rect(right=310, y=self.box_y + 2))
 
         # ── on-screen keyboard ─────────────────────────────────────────────────
         self._kb.draw(surface)

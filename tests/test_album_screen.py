@@ -44,6 +44,9 @@ class FakeApp:
     def request_poll(self):
         pass
 
+    def toggle_play(self):
+        self.mpd.calls.append(("toggle_play",))
+
 
 @pytest.fixture
 def app(tmp_path):
@@ -130,3 +133,15 @@ def test_hour_formatting():
     assert _fmt_total(43 * 60) == "43 min"
     assert _fmt_total(72 * 60) == "1 hr 12 min"
     assert _fmt_total(30) == "<1 min"
+
+
+def test_album_screen_reserves_room_for_the_minibar(app):
+    from musi.player import minibar
+    s = _screen(app)
+    assert s.nav_y <= minibar.BAR_Y
+
+
+def test_album_minibar_tap_opens_now_playing(app):
+    s = _screen(app)
+    s.handle_touch(100, 458)
+    assert app.stack[-1].__class__.__name__ == "NowPlayingScreen"

@@ -3,19 +3,18 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import audio_detect, icons, statusbar, theme
+from musi.player import audio_detect, icons, minibar, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import PendingTap
 
-MENU   = ["Bluetooth", "WiFi", "Sleep Timer", "API", "Updates", "Power"]
-NAV_Y  = 456
+MENU   = ["Bluetooth", "WiFi", "API", "Updates", "Power"]
 
-# Distribute the menu items evenly between the header and the nav hint so the
+# Distribute the menu items evenly between the header and the mini bar so the
 # menu fills the panel instead of bunching at the top.
 _TOP    = 64
-_BOTTOM = 436
+_BOTTOM = minibar.BAR_Y
 _SLOT   = (_BOTTOM - _TOP) // len(MENU)   # vertical space per item
 ITEM_H  = min(70, _SLOT)                  # card height (shrinks as MENU grows)
 
@@ -32,7 +31,6 @@ class SettingsScreen(Screen):
         self._sel = 0
         self._tap = PendingTap()
         self._header_surf: pygame.Surface | None = None
-        self._nav_surf:    pygame.Surface | None = None
         self._menu_surfs:  list[pygame.Surface]  = []
 
     # ── draw ──────────────────────────────────────────────────────────────────
@@ -40,7 +38,6 @@ class SettingsScreen(Screen):
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
         if self._header_surf is None:
             self._header_surf = theme.render("Settings", 16, theme.WHITE, bold=True)
-            self._nav_surf    = theme.render("Enter = open   Esc = back", 10, theme.WHITE)
             self._menu_surfs  = [theme.render(m, 16, theme.WHITE) for m in MENU]
 
         surface.fill(theme.BG)
@@ -67,20 +64,20 @@ class SettingsScreen(Screen):
                 surface.blit(dim, (60, y + (ITEM_H - dim.get_height()) // 2 - 2))
                 icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, theme.CARD_BG)
 
-            # live countdown on the Sleep Timer row
-            if MENU[i] == "Sleep Timer":
-                rem = self.app.sleep_remaining()
-                if rem is not None:
-                    rem_s = theme.render(f"{int(rem // 60) + 1} min", 12,
-                                         theme.WHITE if i == self._sel else theme.DIM)
-                    surface.blit(rem_s, (294 - rem_s.get_width(),
-                                         y + (ITEM_H - rem_s.get_height()) // 2 - 2))
-
-        surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
+        minibar.draw(surface, self.app, status)
 
     # ── input ─────────────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
+        zone = minibar.hit(x, y)
+        if zone == "toggle":
+            self.app.toggle_play()
+            return None
+        if zone == "open":
+            from musi.player.screens.now_playing import NowPlayingScreen
+            self.app.push(NowPlayingScreen(self.app))
+            return None
+
         if _TOP <= y < _BOTTOM and not self._tap.pending:
             i = (y - _TOP) // _SLOT
             if 0 <= i < len(MENU):
@@ -107,30 +104,14 @@ class SettingsScreen(Screen):
             from musi.player.screens.wifi import WifiScreen
             self.app.push(WifiScreen(self.app))
         elif self._sel == 2:
-            self._open_sleep_menu()
-        elif self._sel == 3:
             from musi.player.screens.api_settings import ApiSettingsScreen
             self.app.push(ApiSettingsScreen(self.app))
-        elif self._sel == 4:
+        elif self._sel == 3:
             from musi.player.screens.updates import UpdatesScreen
             self.app.push(UpdatesScreen(self.app))
-        elif self._sel == 5:
+        elif self._sel == 4:
             from musi.player.screens.power import PowerScreen
             self.app.push(PowerScreen(self.app))
-
-    def _open_sleep_menu(self) -> None:
-        from musi.player.screens.context_menu import ContextMenuScreen
-
-        def set_timer(minutes):
-            return lambda: self.app.set_sleep_timer(minutes)
-
-        self.app.push(ContextMenuScreen(self.app, "Sleep timer — pause after", [
-            ("Off",        set_timer(None)),
-            ("15 minutes", set_timer(15)),
-            ("30 minutes", set_timer(30)),
-            ("60 minutes", set_timer(60)),
-            ("90 minutes", set_timer(90)),
-        ]))
 
 
 # ── icon helpers ──────────────────────────────────────────────────────────────
@@ -152,22 +133,16 @@ def _draw_icon(surface, index, cx, cy, col):
                         cy + 3 - int(r * math.sin(math.pi * (0.5 + 0.45 * t / 10))))
                        for t in range(-10, 11)]
                 pygame.draw.lines(surface, col, False, pts, 2)
-    elif index == 2:  # Sleep Timer — crescent moon
-        outer = [(cx + 8 * math.cos(math.radians(d)),
-                  cy + 8 * math.sin(math.radians(d))) for d in range(60, 301, 20)]
-        inner = [(cx + 4 + 6 * math.cos(math.radians(d)),
-                  cy + 6 * math.sin(math.radians(d))) for d in range(285, 74, -20)]
-        pygame.draw.polygon(surface, col, outer + inner)
-    elif index == 3:  # API — globe (circle + equator + meridian)
+    elif index == 2:  # API — globe (circle + equator + meridian)
         pygame.draw.circle(surface, col, (cx, cy), 8, 2)
         pygame.draw.line(surface, col, (cx - 7, cy), (cx + 7, cy), 2)
         pygame.draw.ellipse(surface, col, pygame.Rect(cx - 4, cy - 8, 8, 16), 2)
-    elif index == 4:  # Updates — download arrow into a tray
+    elif index == 3:  # Updates — download arrow into a tray
         pygame.draw.line(surface, col, (cx, cy - 8), (cx, cy + 2), 2)
         pygame.draw.lines(surface, col, False,
                           [(cx - 4, cy - 2), (cx, cy + 2), (cx + 4, cy - 2)], 2)
         pygame.draw.line(surface, col, (cx - 6, cy + 6), (cx + 6, cy + 6), 2)
-    elif index == 5:  # Power — power symbol (circle with top gap + stem)
+    elif index == 4:  # Power — power symbol (circle with top gap + stem)
         pygame.draw.arc(surface, col, pygame.Rect(cx - 8, cy - 7, 16, 16),
                         2.6, 0.55, 2)
         pygame.draw.line(surface, col, (cx, cy - 9), (cx, cy - 1), 2)

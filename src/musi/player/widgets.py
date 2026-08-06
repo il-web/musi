@@ -119,6 +119,121 @@ class KineticList:
         self._vel = 0.0
 
 
+class Carousel:
+    """Horizontal page strip: content follows the finger, snaps on release.
+
+    Mirrors KineticList's gesture API (start_touch / drag_by / end_touch /
+    update) so the horizontal and vertical gestures stay tuned alike. Pages
+    wrap modulo count. All clock-reading methods take an optional `now` so
+    callers — and tests — can supply their own timebase.
+    """
+
+    FLING_VEL  = 260.0   # px/s — a release above this advances a page
+    SNAP_S     = 0.20    # seconds for the snap animation
+    SAMPLE_WIN = 0.10    # seconds of recent finger movement used for fling speed
+
+    def __init__(self, count: int, page_w: int = 320) -> None:
+        self.count   = max(1, count)
+        self.page_w  = page_w
+        self.index   = 0        # current page
+        self.drag_px = 0.0      # content offset; negative = next page incoming
+
+        self._touching = False
+        self._samples: deque = deque()
+        self._anim_from = 0.0
+        self._anim_to   = 0.0
+        self._anim_t0   = 0.0
+        self._advance   = 0     # page delta committed when the snap finishes
+        self._animating = False
+
+    @property
+    def animating(self) -> bool:
+        return self._animating
+
+    # ── gesture input ──────────────────────────────────────────────────────────
+
+    def start_touch(self, now: float | None = None) -> None:
+        """Finger down — catching the strip cancels any in-flight snap."""
+        self._touching  = True
+        self._animating = False
+        self._advance   = 0
+        self._samples.clear()
+
+    def drag_by(self, dx: float, now: float | None = None) -> None:
+        """Finger moved dx px (positive = rightward); content follows."""
+        now = time.monotonic() if now is None else now
+        self.drag_px += dx
+        self._samples.append((now, dx))
+        while self._samples and now - self._samples[0][0] > self.SAMPLE_WIN:
+            self._samples.popleft()
+
+    def end_touch(self, now: float | None = None) -> None:
+        """Finger up — pick a target page and start the snap animation."""
+        now = time.monotonic() if now is None else now
+        self._touching = False
+
+        vel = 0.0
+        moves = [(t, dx) for t, dx in self._samples if now - t <= self.SAMPLE_WIN]
+        if len(moves) >= 2:
+            dt = now - moves[0][0]
+            if dt > 0.001:
+                vel = sum(dx for _, dx in moves) / dt
+        self._samples.clear()
+
+        half = self.page_w / 2
+        if self.count > 1 and (self.drag_px < -half or vel < -self.FLING_VEL):
+            self._advance = 1
+        elif self.count > 1 and (self.drag_px > half or vel > self.FLING_VEL):
+            self._advance = -1
+        else:
+            self._advance = 0
+
+        self._anim_from = self.drag_px
+        self._anim_to   = -self.page_w * self._advance
+        self._anim_t0   = now
+        self._animating = self.drag_px != self._anim_to
+
+        if not self._animating:
+            self._commit()
+
+    # ── per-frame ──────────────────────────────────────────────────────────────
+
+    def update(self, now: float | None = None) -> bool:
+        """Advance the snap. Returns True while the strip is still moving."""
+        if not self._animating:
+            return False
+        now = time.monotonic() if now is None else now
+        t = (now - self._anim_t0) / self.SNAP_S
+        if t >= 1.0 - 1e-9:
+            self.drag_px = self._anim_to
+            self._animating = False
+            self._commit()
+            return False
+        eased = 1.0 - (1.0 - t) ** 3          # ease-out cubic
+        self.drag_px = self._anim_from + (self._anim_to - self._anim_from) * eased
+        return True
+
+    def _commit(self) -> None:
+        """Land on the target page and reset the offset."""
+        if self._advance:
+            self.index = (self.index + self._advance) % self.count
+        self._advance = 0
+        self.drag_px  = 0.0
+
+    # ── geometry ───────────────────────────────────────────────────────────────
+
+    def visible_pages(self) -> list[tuple[int, int]]:
+        """[(page index, x offset)] to blit this frame — 1 at rest, 2 mid-drag."""
+        pages = [(self.index, int(self.drag_px))]
+        if self.count > 1 and self.drag_px < 0:
+            pages.append(((self.index + 1) % self.count,
+                          int(self.drag_px) + self.page_w))
+        elif self.count > 1 and self.drag_px > 0:
+            pages.append(((self.index - 1) % self.count,
+                          int(self.drag_px) - self.page_w))
+        return pages
+
+
 class PendingTap:
     """Defers a tap action briefly so the pressed row is visibly highlighted."""
 
