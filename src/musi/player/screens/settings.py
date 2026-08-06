@@ -107,7 +107,8 @@ class SettingsScreen(Screen):
             from musi.player.screens.wifi import WifiScreen
             self.app.push(WifiScreen(self.app))
         elif self._sel == 2:
-            self._open_sleep_menu()
+            from musi.player.screens.sleep import SleepScreen
+            self.app.push(SleepScreen(self.app))
         elif self._sel == 3:
             from musi.player.screens.api_settings import ApiSettingsScreen
             self.app.push(ApiSettingsScreen(self.app))
@@ -117,20 +118,6 @@ class SettingsScreen(Screen):
         elif self._sel == 5:
             from musi.player.screens.power import PowerScreen
             self.app.push(PowerScreen(self.app))
-
-    def _open_sleep_menu(self) -> None:
-        from musi.player.screens.context_menu import ContextMenuScreen
-
-        def set_timer(minutes):
-            return lambda: self.app.set_sleep_timer(minutes)
-
-        self.app.push(ContextMenuScreen(self.app, "Sleep timer — pause after", [
-            ("Off",        set_timer(None)),
-            ("15 minutes", set_timer(15)),
-            ("30 minutes", set_timer(30)),
-            ("60 minutes", set_timer(60)),
-            ("90 minutes", set_timer(90)),
-        ]))
 
 
 # ── icon helpers ──────────────────────────────────────────────────────────────
