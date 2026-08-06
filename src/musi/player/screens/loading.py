@@ -202,11 +202,11 @@ class LoadingScreen(Screen):
     # ── transition ────────────────────────────────────────────────────────────
 
     def _go_home(self) -> None:
-        from musi.player.screens.home import HomeScreen
+        from musi.player.screens.launcher import LauncherScreen
         self.app._stack.clear()
-        home = HomeScreen(self.app)
-        self.app._stack.append(home)
-        home.on_enter()
+        launcher = LauncherScreen(self.app)
+        self.app._stack.append(launcher)
+        launcher.on_enter()
 
 
 # ── equalizer animation ───────────────────────────────────────────────────────
