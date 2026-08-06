@@ -205,10 +205,138 @@ def test_long_active_lines_wrap_instead_of_truncating():
     assert " ".join(rows) == text          # every word survives
 
 
-def test_wrap_never_exceeds_max_rows():
+def test_wrap_uses_as_many_rows_as_it_takes():
+    """No row cap: a long line wraps rather than losing its tail."""
     text = " ".join(["word"] * 60)
-    assert len(ls._wrap(text, 15, True, 292)) == 2
+    rows = ls._wrap(text, 15, True, 292)
+    assert len(rows) > 2
+    assert " ".join(rows) == text
 
 
 def test_wrap_of_one_huge_word_still_returns_it():
     assert ls._wrap("A" * 200, 15, True, 292) == ["A" * 200]
+
+
+# ── never sleeps ──────────────────────────────────────────────────────────────
+
+def test_screen_never_dims_or_sleeps():
+    """Reading lyrics involves no touching — the panel must stay lit."""
+    assert ls.LyricsScreen.dim_after == 0
+    assert ls.LyricsScreen.off_after == 0
+
+
+# ── every line wraps, not just the active one ─────────────────────────────────
+
+def test_no_line_is_ever_truncated(tmp_path, monkeypatch):
+    long_line = "This is a really quite long lyric line that will not fit"
+    lrc = f"[00:00.00] short\n[00:04.00] {long_line}\n[00:08.00] also short"
+    monkeypatch.setattr(ls.lyrics_lib, "get_lyrics", lambda *a, **k: Lyrics(
+        lines=parse_lrc(lrc), synced=True, found=True))
+    s = ls.LyricsScreen(FakeApp(tmp_path), St())
+    s.on_enter()
+    s.join()
+    surface = pygame.Surface((320, 480))
+    st = St()
+    st.elapsed = 0.0                       # the long line is NOT active here
+    s.draw(surface, st)
+    rows = s.rows_for(1)
+    assert len(rows) > 1                   # wrapped, not cut
+    assert " ".join(rows) == long_line     # every word survives
+
+
+def test_inactive_long_lines_wrap_too(tmp_path, monkeypatch):
+    long_line = "Another extremely long line of lyrics that overflows the panel"
+    lrc = f"[00:00.00] {long_line}\n[00:04.00] b"
+    monkeypatch.setattr(ls.lyrics_lib, "get_lyrics", lambda *a, **k: Lyrics(
+        lines=parse_lrc(lrc), synced=True, found=True))
+    s = ls.LyricsScreen(FakeApp(tmp_path), St())
+    s.on_enter()
+    s.join()
+    st = St()
+    st.elapsed = 5.0                       # line 0 inactive
+    s.draw(pygame.Surface((320, 480)), st)
+    assert len(s.rows_for(0)) > 1
+
+
+def test_wrapped_lines_do_not_overlap(tmp_path, monkeypatch):
+    lrc = ("[00:00.00] A really long first line that has to wrap somewhere\n"
+           "[00:04.00] short\n"
+           "[00:08.00] Another long line that also needs to wrap onto rows")
+    monkeypatch.setattr(ls.lyrics_lib, "get_lyrics", lambda *a, **k: Lyrics(
+        lines=parse_lrc(lrc), synced=True, found=True))
+    s = ls.LyricsScreen(FakeApp(tmp_path), St())
+    s.on_enter()
+    s.join()
+    st = St()
+    st.elapsed = 5.0
+    s.draw(pygame.Surface((320, 480)), st)
+    spans = [(y - h / 2, y + h / 2) for _i, y, h in s._laid]
+    for (_a0, a1), (b0, _b1) in zip(spans, spans[1:]):
+        assert a1 <= b0 + 1, "lines overlap vertically"
+
+
+def test_bigger_text_than_before(tmp_path, monkeypatch):
+    assert ls.ACTIVE_SIZE >= 17
+    assert ls.LINE_SIZE >= 15
+
+
+# ── follows a track change ────────────────────────────────────────────────────
+
+class St2(St):
+    title = "Second"
+    artist = "Other"
+    album = "Album2"
+    path = "/m/t2.mp3"
+    duration = 111.0
+
+
+def test_track_change_reloads_for_the_new_song(tmp_path, monkeypatch):
+    seen = []
+
+    def spy(lyrics_dir, artist, title, album, duration, **kw):
+        seen.append(title)
+        return Lyrics(lines=parse_lrc(_LRC), synced=True, found=True)
+
+    monkeypatch.setattr(ls.lyrics_lib, "get_lyrics", spy)
+    s = ls.LyricsScreen(FakeApp(tmp_path), St())
+    s.on_enter()
+    s.join()
+    assert seen == ["Song"]
+
+    s.draw(pygame.Surface((320, 480)), St2())   # song changed under us
+    s.join()
+    assert seen == ["Song", "Second"]
+    assert s.title == "Second"
+
+
+def test_same_track_does_not_refetch(tmp_path, monkeypatch):
+    seen = []
+
+    def spy(lyrics_dir, artist, title, album, duration, **kw):
+        seen.append(title)
+        return Lyrics(lines=parse_lrc(_LRC), synced=True, found=True)
+
+    monkeypatch.setattr(ls.lyrics_lib, "get_lyrics", spy)
+    s = ls.LyricsScreen(FakeApp(tmp_path), St())
+    s.on_enter()
+    s.join()
+    for _ in range(5):
+        s.draw(pygame.Surface((320, 480)), St())
+    s.join()
+    assert seen == ["Song"]
+
+
+def test_stopping_playback_does_not_clear_the_lyrics(tmp_path, monkeypatch):
+    """An empty path between tracks must not blank the screen."""
+    monkeypatch.setattr(ls.lyrics_lib, "get_lyrics", lambda *a, **k: Lyrics(
+        lines=parse_lrc(_LRC), synced=True, found=True))
+    s = ls.LyricsScreen(FakeApp(tmp_path), St())
+    s.on_enter()
+    s.join()
+
+    class Empty(St):
+        path = ""
+
+    s.draw(pygame.Surface((320, 480)), Empty())
+    assert s.result.found is True
+    assert s.title == "Song"

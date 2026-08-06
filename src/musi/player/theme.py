@@ -56,11 +56,15 @@ def render(
     bold: bool = False,
     max_width: int = 0,
 ) -> pygame.Surface:
-    """Render text, truncating with '…' if wider than max_width."""
+    """Render text, truncating with '...' only if wider than max_width.
+
+    Text that fits is left alone — the ellipsis budget is applied *after*
+    deciding the string overflows, not before, or anything landing within one
+    ellipsis-width of the limit would be clipped for no reason.
+    """
     f = font(size, bold)
-    if max_width > 0:
-        while text and f.size(text)[0] > max_width:
+    if max_width > 0 and text and f.size(text)[0] > max_width:
+        while text and f.size(text + "...")[0] > max_width:
             text = text[:-1]
-        if text and f.size(text + "...")[0] > max_width and len(text) > 3:
-            text = text[:-3] + "..."
+        text = text + "..." if text else text
     return f.render(text, True, colour)
