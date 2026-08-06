@@ -46,16 +46,24 @@ class LauncherScreen(Screen):
         self._press_x = 0
         self._last_x  = 0
         self._moved   = 0.0
+        self._albums: int | None = None   # counted once, not once per frame
 
     @property
     def animates(self) -> bool:
         return self._car.animating
 
+    def on_enter(self) -> None:
+        """Recount the library — it may have grown while we were in an app."""
+        self._albums = None
+
     # ── subtitles ─────────────────────────────────────────────────────────────
 
     def subtitle(self, key: str) -> str:
         if key == "music":
-            n = self.app.db.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+            if self._albums is None:
+                self._albums = self.app.db.execute(
+                    "SELECT COUNT(*) FROM albums").fetchone()[0]
+            n = self._albums
             return f"{n} album" if n == 1 else f"{n} albums"
         if key == "clock":
             from datetime import datetime

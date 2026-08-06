@@ -42,7 +42,7 @@ def process_art(
     """
     art_dir.mkdir(parents=True, exist_ok=True)
 
-    slug         = hashlib.md5(album_key.encode()).hexdigest()[:16]
+    slug         = album_slug(album_key)
     thumb_path   = art_dir / f"{slug}_thumb.jpg"
     backdrop_path = art_dir / f"{slug}_backdrop.jpg"
     palette_path = art_dir / f"{slug}_palette.json"
@@ -67,6 +67,21 @@ def process_art(
     return thumb_path, backdrop_path, palette
 
 
+def album_slug(album_key: str) -> str:
+    """Stable cache-file prefix for an album key. Single source of truth."""
+    return hashlib.md5(album_key.encode()).hexdigest()[:16]
+
+
+def has_local_source(audio_path: Path) -> bool:
+    """True if this track carries album art locally (embedded or a sidecar).
+
+    Authoritative and retroactive: process_art writes a generated gradient when
+    this is False, and the cache files it produces are indistinguishable from
+    real art on disk, so the fetcher re-derives the answer here instead.
+    """
+    return _get_source_image(audio_path) is not None
+
+
 def override_art(
     image_bytes: bytes,
     art_dir: Path,
@@ -83,7 +98,7 @@ def override_art(
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     art_dir.mkdir(parents=True, exist_ok=True)
 
-    slug          = hashlib.md5(album_key.encode()).hexdigest()[:16]
+    slug          = album_slug(album_key)
     thumb_path    = art_dir / f"{slug}_thumb.jpg"
     backdrop_path = art_dir / f"{slug}_backdrop.jpg"
     palette_path  = art_dir / f"{slug}_palette.json"

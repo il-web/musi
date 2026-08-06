@@ -16,11 +16,16 @@ from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
-SHUTDOWN_RECT = pygame.Rect(30, 88,  260, 72)
-REBOOT_RECT   = pygame.Rect(30, 176, 260, 72)
-LOCK_RECT     = pygame.Rect(30, 264, 260, 72)
-CANCEL_RECT   = pygame.Rect(30, 360, 120, 56)
-CONFIRM_RECT  = pygame.Rect(170, 360, 120, 56)
+SHUTDOWN_RECT = pygame.Rect(30, 76,  260, 62)
+REBOOT_RECT   = pygame.Rect(30, 146, 260, 62)
+REFRESH_RECT  = pygame.Rect(30, 216, 260, 62)
+LOCK_RECT     = pygame.Rect(30, 286, 260, 72)
+CANCEL_RECT   = pygame.Rect(30, 380, 120, 56)
+CONFIRM_RECT  = pygame.Rect(170, 380, 120, 56)
+
+# systemd *user* service running the app (updater.SERVICE). Restarting it needs
+# no sudo — hence no sudoers entry, and this ships through OTA unchanged.
+_UI_SERVICE = "musi-ui"
 
 _LOCK_INFO = (
     "SD card becomes read-only after reboot.",
@@ -28,6 +33,11 @@ _LOCK_INFO = (
     "until unlocked.",
 )
 _UNLOCK_INFO = ("Changes persist again after reboot.",)
+_REFRESH_INFO = (
+    "Reloads the player app only —",
+    "music keeps playing and the",
+    "device stays on.",
+)
 
 
 class PowerScreen(Screen):
@@ -60,6 +70,7 @@ class PowerScreen(Screen):
         if self._pending is None:
             self._big_button(surface, SHUTDOWN_RECT, "Shut down", (200, 80, 80))
             self._big_button(surface, REBOOT_RECT,   "Reboot",    theme.CARD_BG)
+            self._big_button(surface, REFRESH_RECT,  "Refresh UI", theme.CARD_BG)
             self._lock_card(surface)
         elif self._pending == "lock":
             q = "Unlock storage?" if self._lock_conf else "Lock storage?"
@@ -70,6 +81,14 @@ class PowerScreen(Screen):
                 s = theme.render(line, 11, theme.DIM)
                 surface.blit(s, s.get_rect(centerx=160, y=y))
                 y += 18
+            self._big_button(surface, CANCEL_RECT,  "Cancel", theme.CARD_BG)
+            self._big_button(surface, CONFIRM_RECT, "Yes",    theme.ACCENT)
+        elif self._pending == "refresh":
+            q = theme.render("Restart the interface?", 15, theme.WHITE, bold=True)
+            surface.blit(q, q.get_rect(centerx=160, y=150))
+            for i, line in enumerate(_REFRESH_INFO):
+                s = theme.render(line, 11, theme.DIM)
+                surface.blit(s, s.get_rect(centerx=160, y=186 + i * 18))
             self._big_button(surface, CANCEL_RECT,  "Cancel", theme.CARD_BG)
             self._big_button(surface, CONFIRM_RECT, "Yes",    theme.ACCENT)
         else:
@@ -116,6 +135,8 @@ class PowerScreen(Screen):
                 self._pending = "shutdown"
             elif REBOOT_RECT.collidepoint(x, y):
                 self._pending = "reboot"
+            elif REFRESH_RECT.collidepoint(x, y):
+                self._pending = "refresh"
             elif LOCK_RECT.collidepoint(x, y) and not self._lock_busy:
                 self._pending = "lock"
         else:
@@ -125,6 +146,8 @@ class PowerScreen(Screen):
                 pending, self._pending = self._pending, None
                 if pending == "lock":
                     self._toggle_lock()
+                elif pending == "refresh":
+                    self._refresh_ui()
                 else:
                     self._run(pending)
         return None
@@ -145,6 +168,21 @@ class PowerScreen(Screen):
             # -i (--ignore-inhibitors) forces it through immediately instead of
             # waiting on logind inhibitor locks (which made it feel "scheduled").
             subprocess.Popen(["sudo", "systemctl", verb, "-i"], start_new_session=True)
+        except Exception as exc:
+            self._msg = f"Failed: {exc}"
+
+    def _refresh_ui(self) -> None:
+        """Restart just the player service — MPD keeps playing throughout.
+
+        Same call the updater makes after a pull (updater.py:158). Detached so
+        the SIGTERM that follows doesn't pre-empt this process mid-write.
+        """
+        self._msg = "Restarting the interface…"
+        try:
+            subprocess.Popen(
+                ["systemctl", "--user", "restart", _UI_SERVICE],
+                start_new_session=True,
+            )
         except Exception as exc:
             self._msg = f"Failed: {exc}"
 

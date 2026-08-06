@@ -117,6 +117,23 @@ DONE
       over SPI. If it drags, the knobs are Carousel.SNAP_S (shorter =
       snappier) and Carousel.FLING_VEL (lower = easier to flick).
 
+[x] Post-launcher pack
+    - PERF (audio stutter on the Pi after the launcher pack): two bits of
+      I/O had landed in the render loop — LauncherScreen ran a
+      SELECT COUNT(*) per frame (~30 queries/s), and art_cache.load_surface
+      had no cache so the mini bar re-decoded album art at every track
+      change on every screen. Both fixed; tests/test_draw_loop_cost.py
+      pins them (commit 44107b2)
+    - Power -> "Refresh UI": restarts the musi-ui *user* service only, so
+      music keeps playing and the device stays up. No sudo, no sudoers
+      entry, no install.sh step (de3c768)
+    - Settings -> Artwork: fetches missing covers from MusicBrainz +
+      Cover Art Archive (keyless, stdlib urllib). Manual only, worker
+      thread. Candidates = albums with no embedded art and no cover.jpg;
+      a .fetched marker in art_dir stops repeat runs re-downloading.
+      Verified end-to-end against the live archive (daf2a64)
+    - STILL NEEDS on-device confirmation that the stutter is actually gone
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
