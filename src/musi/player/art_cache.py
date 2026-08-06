@@ -64,8 +64,14 @@ def parse_palette(palette_json: str, do_brighten: bool = False) -> tuple:
         return theme.ACCENT
 
 
+@lru_cache(maxsize=64)
 def load_surface(path: str, size: tuple[int, int]) -> pygame.Surface | None:
-    """Load an image and scale it."""
+    """Load an image and scale it. Cached per (path, size).
+
+    The mini bar reloads art on every track change on every screen that shows
+    it, so an uncached decode here blocks the UI thread and starves MPD of the
+    Zero W's single core — audible as a stutter at the track boundary.
+    """
     if not path or not Path(path).exists():
         return None
     try:
