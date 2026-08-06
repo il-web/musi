@@ -64,6 +64,21 @@ class BrowseScreen(ListScreen):
         if self._level == 0:
             self._load_artists()
 
+    # ── host hooks ────────────────────────────────────────────────────────────
+
+    @property
+    def crumb(self) -> "str | None":
+        """Artist name while inside an artist, else None.
+
+        A tab host reads this to swap its tab strip for a back row: the header
+        this screen draws at y 26 sits under the host's chrome.
+        """
+        return self._artist_name if self._level > 0 else None
+
+    def go_up(self) -> None:
+        """Leave the album grid for the artist list (or pop, at the top)."""
+        self._go_back()
+
     # ── draw ──────────────────────────────────────────────────────────────────
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:

@@ -148,6 +148,51 @@ def test_draw_runs_for_every_tab(app):
         s.draw(surface, FakeStatus())
 
 
+def test_browse_crumb_is_none_at_the_artist_level(app):
+    s = _music(app)
+    s.child.on_enter()
+    assert s.child.crumb is None
+
+
+def test_album_level_swaps_the_tab_strip_for_a_breadcrumb(app):
+    s = _music(app)
+    s.child.on_enter()
+    s.child._select()                # step into the artist
+    assert s.child.crumb == "Artist"
+
+
+def test_breadcrumb_tap_goes_up_instead_of_switching_tabs(app):
+    s = _music(app)
+    s.child.on_enter()
+    s.child._select()
+    s.handle_touch(120, 40)          # the Search tab's x, but the band is a crumb
+    assert s.tab == 0
+    assert s.child.crumb is None     # went back to the artist list
+
+
+def test_breadcrumb_surface_is_cached_between_frames(app):
+    surface = pygame.Surface((320, 480))
+    s = _music(app)
+    s.child.on_enter()
+    s.child._select()
+    s.draw(surface, FakeStatus())
+    first = s._crumb_surf
+    assert first is not None
+    s.draw(surface, FakeStatus())
+    assert s._crumb_surf is first
+
+
+def test_tabs_return_after_leaving_the_album_level(app):
+    surface = pygame.Surface((320, 480))
+    s = _music(app)
+    s.child.on_enter()
+    s.child._select()
+    s.child.go_up()
+    s.draw(surface, FakeStatus())
+    s.handle_touch(120, 40)
+    assert s.tab == 1                # tab strip is back, tap switches again
+
+
 def test_switching_tabs_fires_lifecycle(app):
     s = _music(app)
     events = []

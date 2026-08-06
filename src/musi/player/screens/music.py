@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import minibar, theme
+from musi.player import icons, minibar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -34,6 +34,8 @@ class MusicScreen(Screen):
         self._children: dict[int, Screen] = {}
         self._tab_surfs: list[pygame.Surface] = []
         self._tab_surfs_on: list[pygame.Surface] = []
+        self._crumb_surf: pygame.Surface | None = None
+        self._crumb_text: str = ""
 
     # ── children ──────────────────────────────────────────────────────────────
 
@@ -83,9 +85,33 @@ class MusicScreen(Screen):
                                   for t in self.TABS]
 
         self.child.draw(surface, status)
-        self._draw_tabs(surface)
+        crumb = self._crumb()
+        if crumb is None:
+            self._draw_tabs(surface)
+        else:
+            self._draw_crumb(surface, crumb)
         if self.tab != _SEARCH_TAB:
             minibar.draw(surface, self.app, status)
+
+    def _crumb(self) -> "str | None":
+        """The child's breadcrumb when it has drilled in, else None.
+
+        Children that never drill in (search, history) simply lack the
+        attribute and always get the tab strip.
+        """
+        return getattr(self.child, "crumb", None)
+
+    def _draw_crumb(self, surface: pygame.Surface, crumb: str) -> None:
+        """Header band: a back chevron and where you are, instead of tabs."""
+        pygame.draw.rect(surface, theme.BG, (0, TAB_Y, 320, TAB_H))
+        cy = TAB_Y + TAB_H // 2
+        icons.draw_chevron_left(surface, 16, cy, theme.ACCENT)
+        if crumb != self._crumb_text:
+            self._crumb_text = crumb
+            self._crumb_surf = theme.render(crumb, 14, theme.WHITE, bold=True,
+                                            max_width=272)
+        surface.blit(self._crumb_surf,
+                     self._crumb_surf.get_rect(x=30, centery=cy))
 
     def _draw_tabs(self, surface: pygame.Surface) -> None:
         pygame.draw.rect(surface, theme.BG, (0, TAB_Y, 320, TAB_H))
@@ -102,7 +128,10 @@ class MusicScreen(Screen):
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if TAB_Y <= y < CONTENT_Y:
-            self.set_tab(min(len(self.TABS) - 1, x // _TAB_W))
+            if self._crumb() is None:
+                self.set_tab(min(len(self.TABS) - 1, x // _TAB_W))
+            else:
+                self.child.go_up()      # the band is a back row right now
             return None
         if self.tab != _SEARCH_TAB:
             zone = minibar.hit(x, y)
