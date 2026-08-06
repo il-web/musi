@@ -134,6 +134,8 @@ class NowPlayingScreen(Screen):
         off = (150, 150, 165)
         _draw_shuffle(surface, 56,  SEC_Y, self._accent if status.shuffle else off)
         _draw_repeat(surface,  120, SEC_Y, self._accent if status.repeat  else off)
+        _draw_lyrics_icon(surface, 180, SEC_Y,
+                          theme.WHITE if status.path else off)
         _draw_list_icon(surface, 232, SEC_Y, theme.WHITE)
         surface.blit(self._queue_lbl, self._queue_lbl.get_rect(midleft=(246, SEC_Y)))
 
@@ -154,7 +156,7 @@ class NowPlayingScreen(Screen):
                 return Button.PLAY_PAUSE
             else:
                 return Button.NEXT
-        # secondary row: shuffle | repeat | queue
+        # secondary row: shuffle | repeat | lyrics | queue
         if SEC_Y - 18 <= y <= SEC_Y + 18:
             if x < 90:
                 self.app.mpd.toggle_shuffle()
@@ -162,7 +164,9 @@ class NowPlayingScreen(Screen):
             elif x < 160:
                 self.app.mpd.toggle_repeat()
                 self.app.request_poll()
-            elif x > 200:
+            elif x < 206:
+                self._open_lyrics()
+            else:
                 self._open_queue()
             return None
         # tapping the album art toggles play/pause (big target)
@@ -211,6 +215,14 @@ class NowPlayingScreen(Screen):
     def _open_queue(self) -> None:
         from musi.player.screens.queue import QueueScreen
         self.app.push(QueueScreen(self.app))
+
+    def _open_lyrics(self) -> None:
+        """Lyrics for whatever is playing right now — nothing without a track."""
+        status = self.app.status
+        if not status.path:
+            return
+        from musi.player.screens.lyrics import LyricsScreen
+        self.app.push(LyricsScreen(self.app, status))
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         mpd = self.app.mpd
@@ -309,6 +321,18 @@ def _draw_repeat(surface, cx, cy, col):
 def _draw_list_icon(surface, cx, cy, col):
     for dy in (-6, 0, 6):
         pygame.draw.line(surface, col, (cx - 9, cy + dy), (cx + 9, cy + dy), 2)
+
+
+def _draw_lyrics_icon(surface, cx, cy, col):
+    """Speech bubble with text lines — distinct from the queue's plain bars."""
+    body = pygame.Rect(cx - 9, cy - 8, 18, 14)
+    pygame.draw.rect(surface, col, body, 2, border_radius=4)
+    pygame.draw.polygon(surface, col, [
+        (cx - 4, cy + 6), (cx + 1, cy + 6), (cx - 3, cy + 10),
+    ])
+    for i, dy in enumerate((-3, 1)):
+        pygame.draw.line(surface, col, (cx - 5, cy + dy),
+                         (cx + (4 if i == 0 else 1), cy + dy), 2)
 
 
 def _speaker_icon(surface, cx, cy, col):

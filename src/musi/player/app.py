@@ -47,10 +47,14 @@ class App:
         mpd: MusiMPDClient,
         db:  sqlite3.Connection,
         art_dir: Path,
+        lyrics_dir: Path | None = None,
     ) -> None:
+        from musi.library.config import lyrics_dir as _default_lyrics_dir
+
         self._mpd     = mpd
         self._db      = db
         self._art_dir = art_dir
+        self._lyrics_dir = lyrics_dir or _default_lyrics_dir()
 
         self._stack:           list[Screen] = []
         self._status:          PlayerStatus = PlayerStatus.disconnected()
@@ -70,6 +74,8 @@ class App:
     def db(self)      -> sqlite3.Connection:  return self._db
     @property
     def art_dir(self) -> Path:                return self._art_dir
+    @property
+    def lyrics_dir(self) -> Path:             return self._lyrics_dir
     @property
     def status(self)  -> PlayerStatus:        return self._status
 

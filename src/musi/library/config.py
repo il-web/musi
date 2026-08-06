@@ -26,6 +26,10 @@ def art_dir() -> Path:
     return Path(os.environ.get("MUSI_ART_DIR", _BASE / "art"))
 
 
+def lyrics_dir() -> Path:
+    return Path(os.environ.get("MUSI_LYRICS_DIR", _BASE / "lyrics"))
+
+
 def api_token_path() -> Path:
     return Path(os.environ.get("MUSI_API_TOKEN_PATH", _BASE / "api-token"))
 
