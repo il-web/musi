@@ -13,8 +13,8 @@ from musi.player.mpd_client import PlayerStatus
 from musi.player.list_screen import ListScreen
 
 ITEM_H  = 52          # height of each list row
-LIST_Y  = 62          # top of the list (below statusbar + breadcrumb)
-NAV_Y   = 456
+LIST_Y  = 62          # default top of the list (below statusbar + breadcrumb)
+NAV_Y   = 456         # default bottom of the content area
 
 # Albums level renders as a 2-column art grid instead of rows.
 GRID_H     = 185      # height of one grid row (two album cells)
@@ -45,8 +45,8 @@ class _Item:
 
 class BrowseScreen(ListScreen):
 
-    def __init__(self, app) -> None:
-        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
+    def __init__(self, app, list_y: int = LIST_Y, nav_y: int = NAV_Y) -> None:
+        super().__init__(app, item_h=ITEM_H, list_y=list_y, nav_y=nav_y)
         self._level:       int         = 0
         self._artist_id:   int         = 0
         self._artist_name: str         = ""
@@ -58,9 +58,6 @@ class BrowseScreen(ListScreen):
         self._rail_letter = ""
         self._rail_surfs: list[pygame.Surface] | None = None
 
-        # static surfaces
-        self._nav_surf: pygame.Surface | None = None
-
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def on_enter(self) -> None:
@@ -70,11 +67,6 @@ class BrowseScreen(ListScreen):
     # ── draw ──────────────────────────────────────────────────────────────────
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
-        if self._nav_surf is None:
-            self._nav_surf = theme.render(
-                "Enter = select   Esc = back", 10, theme.WHITE
-            )
-
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
 
@@ -101,9 +93,6 @@ class BrowseScreen(ListScreen):
         if not self._items:
             msg = theme.render("Nothing here", 13, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=220))
-
-        # ── nav ───────────────────────────────────────────────────────────────
-        surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         if self._level == 1:
@@ -156,11 +145,11 @@ class BrowseScreen(ListScreen):
         if self._rail_surfs is None:
             self._rail_surfs = [theme.render(c, 9, theme.DIM)
                                 for c in RAIL_LETTERS]
-        span = (NAV_Y - 24) - LIST_Y
+        span = (self.nav_y - 24) - self.list_y
         step = span / len(RAIL_LETTERS)
         for i, s in enumerate(self._rail_surfs):
             surface.blit(s, s.get_rect(centerx=306,
-                                       centery=int(LIST_Y + (i + 0.5) * step)))
+                                       centery=int(self.list_y + (i + 0.5) * step)))
 
         # big letter bubble while the finger is on the rail
         if self._rail_active and self._rail_letter:
@@ -172,8 +161,8 @@ class BrowseScreen(ListScreen):
             surface.blit(big, big.get_rect(center=box.center))
 
     def _rail_jump(self, y: int) -> None:
-        span = (NAV_Y - 24) - LIST_Y
-        frac = min(0.999, max(0.0, (y - LIST_Y) / span))
+        span = (self.nav_y - 24) - self.list_y
+        frac = min(0.999, max(0.0, (y - self.list_y) / span))
         letter = RAIL_LETTERS[int(frac * len(RAIL_LETTERS))]
         self._rail_letter = letter
         if letter == "#":
@@ -189,7 +178,7 @@ class BrowseScreen(ListScreen):
     def on_press(self, x: int, y: int) -> bool:
         # A-Z rail captures the gesture so dragging scrubs by letter
         if (self._level == 0 and x >= RAIL_X and self._items
-                and LIST_Y <= y < NAV_Y - 24):
+                and self.list_y <= y < self.nav_y - 24):
             self._rail_active = True
             self._rail_jump(y)
             return True
@@ -207,13 +196,13 @@ class BrowseScreen(ListScreen):
         self._klist.ensure_visible(row)
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
-        if not (LIST_Y <= y < NAV_Y - 24) or self._tap.pending:
+        if not (self.list_y <= y < self.nav_y - 24) or self._tap.pending:
             # "‹ back" hint in the header area
-            if y < LIST_Y and x > 200 and self._level > 0:
+            if y < self.list_y and x > 200 and self._level > 0:
                 return Button.BACK
             return super().handle_touch(x, y)
 
-        row_idx = self._klist.index_at(y - LIST_Y)
+        row_idx = self._klist.index_at(y - self.list_y)
         if self._level == 1:
             col = 0 if x < 160 else 1
             di = row_idx * 2 + col
@@ -228,9 +217,9 @@ class BrowseScreen(ListScreen):
         return super().handle_touch(x, y)
 
     def handle_long_press(self, x: int, y: int) -> bool:
-        if self._level != 1 or not (LIST_Y <= y < NAV_Y - 24):
+        if self._level != 1 or not (self.list_y <= y < self.nav_y - 24):
             return False
-        row_idx = self._klist.index_at(y - LIST_Y)
+        row_idx = self._klist.index_at(y - self.list_y)
         col = 0 if x < 160 else 1
         di = row_idx * 2 + col
         if not (0 <= di < len(self._items)):

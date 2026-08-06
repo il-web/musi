@@ -8,20 +8,20 @@ from musi.player.list_screen import ListScreen
 from musi.player.mpd_client import PlayerStatus
 
 ITEM_H = 52
-LIST_Y = 62
-NAV_Y = 456
+LIST_Y = 62      # default top of the list
+NAV_Y = 456      # default bottom of the content area
 
 
 class HistoryScreen(ListScreen):
-    def __init__(self, app, mode: str = "recent") -> None:
-        super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
+    def __init__(self, app, mode: str = "recent",
+                 list_y: int = LIST_Y, nav_y: int = NAV_Y) -> None:
+        super().__init__(app, item_h=ITEM_H, list_y=list_y, nav_y=nav_y)
         self._mode = mode  # "recent" or "most"
         self._items = []
 
         # static surfaces
         title = "Recently Played" if mode == "recent" else "Most Played"
         self._header_surf = theme.render(title, 16, theme.WHITE, bold=True)
-        self._nav_surf = theme.render("Tap to play   ·   Esc = back", 10, theme.DIM)
 
     def on_enter(self) -> None:
         self._load_items()
@@ -63,8 +63,6 @@ class HistoryScreen(ListScreen):
             msg = theme.render("No play history yet", 13, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=240))
 
-        surface.blit(self._nav_surf, self._nav_surf.get_rect(centerx=160, y=NAV_Y))
-
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         item = self._items[di]
         sel = (di == self._sel)
@@ -94,8 +92,8 @@ class HistoryScreen(ListScreen):
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 40:
             return Button.BACK
-        if LIST_Y <= y < NAV_Y - 24 and not self._tap.pending:
-            di = self._klist.index_at(y - LIST_Y)
+        if self.list_y <= y < self.nav_y - 24 and not self._tap.pending:
+            di = self._klist.index_at(y - self.list_y)
             if 0 <= di < len(self._items):
                 self._sel = di
                 self._tap.set(lambda: self._play_item(self._items[self._sel]))
@@ -103,9 +101,9 @@ class HistoryScreen(ListScreen):
         return super().handle_touch(x, y)
 
     def handle_long_press(self, x: int, y: int) -> bool:
-        if not (LIST_Y <= y < NAV_Y - 24):
+        if not (self.list_y <= y < self.nav_y - 24):
             return False
-        di = self._klist.index_at(y - LIST_Y)
+        di = self._klist.index_at(y - self.list_y)
         if not (0 <= di < len(self._items)):
             return False
         self._sel = di
