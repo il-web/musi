@@ -9,7 +9,7 @@ from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import PendingTap
 
-MENU   = ["Bluetooth", "WiFi", "API", "Updates", "Power"]
+MENU   = ["Bluetooth", "WiFi", "Artwork", "API", "Updates", "Power"]
 
 # Distribute the menu items evenly between the header and the mini bar so the
 # menu fills the panel instead of bunching at the top.
@@ -104,12 +104,15 @@ class SettingsScreen(Screen):
             from musi.player.screens.wifi import WifiScreen
             self.app.push(WifiScreen(self.app))
         elif self._sel == 2:
+            from musi.player.screens.artwork import ArtworkScreen
+            self.app.push(ArtworkScreen(self.app))
+        elif self._sel == 3:
             from musi.player.screens.api_settings import ApiSettingsScreen
             self.app.push(ApiSettingsScreen(self.app))
-        elif self._sel == 3:
+        elif self._sel == 4:
             from musi.player.screens.updates import UpdatesScreen
             self.app.push(UpdatesScreen(self.app))
-        elif self._sel == 4:
+        elif self._sel == 5:
             from musi.player.screens.power import PowerScreen
             self.app.push(PowerScreen(self.app))
 
@@ -133,16 +136,21 @@ def _draw_icon(surface, index, cx, cy, col):
                         cy + 3 - int(r * math.sin(math.pi * (0.5 + 0.45 * t / 10))))
                        for t in range(-10, 11)]
                 pygame.draw.lines(surface, col, False, pts, 2)
-    elif index == 2:  # API — globe (circle + equator + meridian)
+    elif index == 2:  # Artwork — picture frame with a peak and a sun
+        pygame.draw.rect(surface, col, pygame.Rect(cx - 8, cy - 7, 16, 14), 2)
+        pygame.draw.circle(surface, col, (cx + 3, cy - 3), 2)
+        pygame.draw.lines(surface, col, False,
+                          [(cx - 7, cy + 5), (cx - 2, cy - 1), (cx + 7, cy + 6)], 2)
+    elif index == 3:  # API — globe (circle + equator + meridian)
         pygame.draw.circle(surface, col, (cx, cy), 8, 2)
         pygame.draw.line(surface, col, (cx - 7, cy), (cx + 7, cy), 2)
         pygame.draw.ellipse(surface, col, pygame.Rect(cx - 4, cy - 8, 8, 16), 2)
-    elif index == 3:  # Updates — download arrow into a tray
+    elif index == 4:  # Updates — download arrow into a tray
         pygame.draw.line(surface, col, (cx, cy - 8), (cx, cy + 2), 2)
         pygame.draw.lines(surface, col, False,
                           [(cx - 4, cy - 2), (cx, cy + 2), (cx + 4, cy - 2)], 2)
         pygame.draw.line(surface, col, (cx - 6, cy + 6), (cx + 6, cy + 6), 2)
-    elif index == 4:  # Power — power symbol (circle with top gap + stem)
+    elif index == 5:  # Power — power symbol (circle with top gap + stem)
         pygame.draw.arc(surface, col, pygame.Rect(cx - 8, cy - 7, 16, 16),
                         2.6, 0.55, 2)
         pygame.draw.line(surface, col, (cx, cy - 9), (cx, cy - 1), 2)
