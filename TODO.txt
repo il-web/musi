@@ -134,6 +134,20 @@ DONE
       Verified end-to-end against the live archive (daf2a64)
     - STILL NEEDS on-device confirmation that the stutter is actually gone
 
+[x] Lyrics pack
+    - Now Playing -> lyrics button (speech bubble, between repeat and
+      Queue) opens synced lyrics for the *currently playing* track only.
+      Nothing downloads until you tap it (99abee5)
+    - Source: LRCLIB (keyless, stdlib urllib). LRC lines auto-scroll with
+      the active line centred + bold; tapping a line seeks there. The
+      active line wraps to a 2nd row instead of truncating. Plain
+      (untimed) lyrics fall back to a scrollable view
+    - Cached per track under MUSI_LYRICS_DIR (config.lyrics_dir): 216ms
+      network -> 0.4ms cached, one request per song for its lifetime.
+      Misses are cached so an offline device stops re-querying, but
+      transport errors are NOT (that would mark songs lyric-less for
+      good); "Try again" forces a refetch
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
