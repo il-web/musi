@@ -13,15 +13,25 @@
 #   3. mirror the same change in install.sh for fresh installs
 #      (install.sh seeds update-level to LATEST_STEP, so a fresh install
 #       never re-runs steps it already covers)
+#   4. if you added a root_N: the device needs ONE manual "bash install.sh"
+#      over SSH before OTA can apply it — see below for why
 #
-# Root parts run through "sudo -n /bin/bash update.sh --root <level>";
-# install.sh grants exactly that command passwordless (sudoers.d/musi-power).
+# WHY ROOT STEPS NEED A MANUAL INSTALL:
+# The root half does NOT run from this file. It runs from a root-owned copy at
+# /usr/local/lib/musi/update-root.sh, and sudoers grants exactly that path.
+# This file lives in the git checkout, which the app's own user can write — if
+# sudoers pointed here, anyone with code execution as that user could append a
+# line and become root. So OTA can freely update the user half, and changing
+# what runs as root requires install.sh, which needs a real sudo password.
 set -u
 
 SELF="$(readlink -f "$0")"
 REPO="$(cd "$(dirname "$SELF")" && pwd)"
 STATE_DIR="$HOME/.local/share/musi"
 STATE="$STATE_DIR/update-level"
+
+# Root-owned copy of this script — the only thing sudoers will run as root.
+ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
 LATEST_STEP=3
 
@@ -116,7 +126,22 @@ for n in $(seq $((level + 1)) "$LATEST_STEP"); do
     declare -F "root_$n" > /dev/null && need_root=1
 done
 if [ "$need_root" = 1 ]; then
-    if ! sudo -n /bin/bash "$SELF" --root "$level"; then
+    # The root-owned copy is what actually runs. If it is missing or predates
+    # the step we need, it simply doesn't contain that root_N function — it
+    # would exit 0 having done nothing, and we'd record the step as applied.
+    # Check its level explicitly rather than let it fail silently.
+    root_level=0
+    if [ -r "$ROOT_SCRIPT" ]; then
+        root_level="$(sed -n 's/^LATEST_STEP=\([0-9]*\).*/\1/p' "$ROOT_SCRIPT" | head -1)"
+        case "$root_level" in (*[!0-9]*|'') root_level=0 ;; esac
+    fi
+    if [ "$root_level" -lt "$LATEST_STEP" ]; then
+        say "!! root steps changed — run once over SSH:  bash install.sh"
+        say "   (installed root helper is at level $root_level, need $LATEST_STEP)"
+        say "   level stays at $level so everything retries afterwards"
+        exit 1
+    fi
+    if ! sudo -n /bin/bash "$ROOT_SCRIPT" --root "$level"; then
         say "!! root steps need permission — run once over SSH: bash install.sh"
         say "   (level stays at $level so everything retries afterwards)"
         exit 1

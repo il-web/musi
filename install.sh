@@ -182,11 +182,37 @@ done
 
 # ── 9c. power controls (Settings → Power) ─────────────────────────────────────
 say "[9c] Power-off / reboot permission"
+
+# The root half of update.sh runs from a ROOT-OWNED copy, never from the git
+# checkout. The checkout is writable by this user, so granting sudo on a script
+# in it would let anyone with code execution as this user append a line and
+# become root — i.e. it would be equivalent to NOPASSWD: ALL.
+#
+# Consequence, by design: OTA can update the user half freely, but changing what
+# runs as root requires re-running this installer (which asks for a real sudo
+# password). update.sh detects a stale copy and tells you.
+sudo install -d -m 0755 -o root -g root /usr/local/lib/musi
+sudo install -m 0755 -o root -g root "$SCRIPT_DIR/update.sh" /usr/local/lib/musi/update-root.sh
+
 # Sudoers rules must be a single line; a malformed sudoers.d file makes every
 # sudo call print parse errors. Validate with visudo before installing.
+#
+# Each entry is the narrowest form the app actually invokes. Commas inside an
+# argument must be backslash-escaped or sudoers reads them as rule separators.
 TMP_SUDOERS="$(mktemp)"
-printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl poweroff -i, /usr/bin/systemctl reboot, /usr/bin/systemctl reboot -i, /usr/bin/nmcli *, /usr/sbin/iw *, /usr/bin/raspi-config nonint do_overlayfs *, /bin/bash %s/update.sh --root *\n' \
-    "$USER_NAME" "$SCRIPT_DIR" > "$TMP_SUDOERS"
+printf '%s ALL=(root) NOPASSWD: %s\n' "$USER_NAME" \
+"/usr/bin/systemctl poweroff, \
+/usr/bin/systemctl poweroff -i, \
+/usr/bin/systemctl reboot, \
+/usr/bin/systemctl reboot -i, \
+/usr/bin/nmcli -t -f IN-USE\\,SIGNAL\\,SECURITY\\,SSID device wifi list --rescan yes, \
+/usr/bin/nmcli device wifi connect *, \
+/usr/bin/nmcli connection delete id *, \
+/usr/sbin/iw dev wlan0 set power_save on, \
+/usr/sbin/iw dev wlan0 set power_save off, \
+/usr/bin/raspi-config nonint do_overlayfs 0, \
+/usr/bin/raspi-config nonint do_overlayfs 1, \
+/bin/bash /usr/local/lib/musi/update-root.sh --root *" > "$TMP_SUDOERS"
 if sudo visudo -c -f "$TMP_SUDOERS" > /dev/null; then
     sudo install -m 0440 -o root -g root "$TMP_SUDOERS" /etc/sudoers.d/musi-power
 else
