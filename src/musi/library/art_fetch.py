@@ -40,6 +40,11 @@ _PAUSE_S = 1.0
 # only skips that album — no marker is written, so the next run retries it.
 _TIMEOUT = 25.0
 
+# Cap on any single response body. A cover is a few hundred KB and the JSON is
+# smaller still; without a limit a hostile or broken endpoint could stream until
+# the 512MB Zero W runs out of memory.
+_MAX_BYTES = 8 * 1024 * 1024
+
 
 def _http_get(url: str, *, accept_image: bool = False,
               timeout: float = _TIMEOUT) -> bytes | None:
@@ -50,7 +55,14 @@ def _http_get(url: str, *, accept_image: bool = False,
     })
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+            # Read one byte past the cap so an exactly-at-limit body is still
+            # distinguishable from a truncated oversized one.
+            body = resp.read(_MAX_BYTES + 1)
+            if len(body) > _MAX_BYTES:
+                logging.info("art_fetch: response over %d bytes, dropped: %s",
+                             _MAX_BYTES, url)
+                return None
+            return body
     except Exception:
         logging.info("art_fetch: GET failed for %s", url, exc_info=True)
         return None

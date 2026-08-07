@@ -31,13 +31,21 @@ def load_token(path: Path | None = None) -> str:
 
 
 def regenerate_token(path: Path | None = None) -> str:
-    """Write a fresh random token and return it."""
+    """Write a fresh random token and return it.
+
+    Created 0600 by os.open rather than written and then chmod'ed — the latter
+    leaves the token world-readable for the moment in between.
+    """
     path = path or api_token_path()
     token = secrets.token_urlsafe(24)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(token + "\n")
     try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(token + "\n")
+        # O_CREAT only applies the mode to a *new* file; fix up an existing one.
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)   # 0600 (no-op on Windows)
     except OSError:
-        log.warning("could not chmod api-token", exc_info=True)
+        log.warning("could not write api-token securely", exc_info=True)
+        path.write_text(token + "\n")
     return token

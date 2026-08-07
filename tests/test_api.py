@@ -52,6 +52,7 @@ def client(tmp_path):
     c = app.test_client()
     c.music_root = music          # for upload/delete assertions
     c.art_dir    = art
+    c.db_path    = db
     return c
 
 
@@ -63,11 +64,23 @@ def test_api_requires_token(client):
                       headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
-def test_legacy_routes_stay_open(client):
+def test_only_the_page_itself_is_public(client):
+    """/ is public because it is the form that asks for the token; everything
+    it calls needs one. 'On the LAN' includes every other device on the WiFi."""
     page = client.get("/")
     assert page.status_code == 200
-    assert b"WiFi Transfer" in page.data
-    assert client.get("/stats").get_json() == {"tracks": 2}
+    assert b"Device token" in page.data
+
+    assert client.get("/stats").status_code == 401
+    assert client.get("/stats", headers=AUTH).get_json() == {"tracks": 2}
+    assert client.post("/upload", data={
+        "file": (io.BytesIO(b"ID3"), "sneaky.mp3")}).status_code == 401
+    assert not (client.music_root / "sneaky.mp3").exists()
+
+
+def test_page_does_not_leak_the_token(client):
+    """The public page must not embed the token it is asking the user for."""
+    assert TOKEN.encode() not in client.get("/").data
 
 
 # ── read endpoints ────────────────────────────────────────────────────────────
@@ -112,6 +125,23 @@ def test_album_art(client):
     assert r.data.startswith(b"\xff\xd8\xff")
 
 
+def test_album_art_refuses_paths_outside_the_cache(client, tmp_path):
+    """The art route reads whatever path the DB names. If anything ever writes
+    an art_path pointing elsewhere, it must not become a file-read primitive."""
+    secret = tmp_path / "secret.txt"
+    secret.write_text("ssh-private-key")
+    aid = client.get("/api/v1/albums", headers=AUTH).get_json()["albums"][0]["id"]
+
+    conn = open_db(client.db_path)
+    conn.execute("UPDATE albums SET art_path = ? WHERE id = ?", (str(secret), aid))
+    conn.commit()
+    conn.close()
+
+    r = client.get(f"/api/v1/albums/{aid}/art", headers=AUTH)
+    assert r.status_code == 404
+    assert b"ssh-private-key" not in r.data
+
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
 
 def test_cors_preflight_needs_no_token(client):
@@ -135,20 +165,20 @@ def test_cors_unknown_origin(client):
 # ── legacy upload ─────────────────────────────────────────────────────────────
 
 def test_upload(client):
-    r = client.post("/upload", data={
+    r = client.post("/upload", headers=AUTH, data={
         "file": (io.BytesIO(b"ID3-not-really-audio"), "song.mp3"),
     })
     assert r.get_json()["status"] == "ok"
     assert (client.music_root / "song.mp3").read_bytes() == b"ID3-not-really-audio"
 
     # same name again → skipped
-    r = client.post("/upload", data={
+    r = client.post("/upload", headers=AUTH, data={
         "file": (io.BytesIO(b"ID3-other"), "song.mp3"),
     })
     assert r.get_json()["status"] == "skipped"
 
     # non-audio → skipped
-    r = client.post("/upload", data={
+    r = client.post("/upload", headers=AUTH, data={
         "file": (io.BytesIO(b"hi"), "notes.txt"),
     })
     assert r.get_json()["status"] == "skipped"
@@ -156,7 +186,7 @@ def test_upload(client):
 
 def test_upload_refused_while_storage_locked(client, monkeypatch):
     monkeypatch.setattr("musi.api.server._storage_locked", lambda: True)
-    r = client.post("/upload", data={
+    r = client.post("/upload", headers=AUTH, data={
         "file": (io.BytesIO(b"ID3"), "locked.mp3"),
     })
     assert r.status_code == 423
@@ -166,11 +196,12 @@ def test_upload_refused_while_storage_locked(client, monkeypatch):
 # ── tunnel exposure (pack 3) ──────────────────────────────────────────────────
 
 def test_legacy_routes_hidden_from_tunnel(client):
-    """Requests through the Cloudflare Tunnel carry CF headers — the
-    tokenless legacy routes must 404 for them."""
+    """Requests through a Cloudflare Tunnel carry CF headers — the management
+    page and its routes are LAN-only and must 404 for them, token or not."""
     cf = {"Cf-Ray": "8a1b2c3d4e5f0000-TLV"}
     assert client.get("/", headers=cf).status_code == 404
     assert client.get("/stats", headers=cf).status_code == 404
+    assert client.get("/stats", headers={**AUTH, **cf}).status_code == 404
     assert client.post("/upload", headers={"CF-Connecting-IP": "1.2.3.4"}, data={
         "file": (io.BytesIO(b"x"), "z.mp3")}).status_code == 404
     # the authenticated API is exactly what the tunnel is for

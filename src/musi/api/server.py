@@ -1,15 +1,18 @@
 """musi device API — always-on Flask app (port 8080).
 
-Grown from the old WiFi-transfer server: the drag-and-drop upload page still
-lives at ``/`` for LAN use, and ``/api/v1/*`` adds the authenticated JSON API
-the musi website talks to. Runs permanently as the ``musi-api`` systemd user
-service; Settings → API on the device shows the URL and token.
+The device is its own server: http://musi.local:8080 serves the management page
+at ``/`` and the JSON API at ``/api/v1/*``. Runs permanently as the ``musi-api``
+systemd user service; Settings → API on the device shows the URL and token.
 
-Auth: every ``/api/v1`` request needs ``Authorization: Bearer <token>``
-(token file: see musi.api.auth). The legacy ``/``, ``/upload`` and ``/stats``
-routes stay tokenless for LAN convenience; internet traffic can't reach them —
-the Cloudflare Tunnel ingress only forwards ``/api/*`` (see
-pi/cloudflared-config.yml) and ``_via_tunnel()`` 404s them as a backstop.
+Auth: **every route except ``/`` needs ``Authorization: Bearer <token>``**
+(token file: see musi.api.auth). ``/`` is public only because it is the page
+that asks for the token — it holds no data of its own. Uploads and stats used
+to be tokenless for LAN convenience; they aren't any more, because "on the LAN"
+includes every guest phone and IoT gadget on the same WiFi.
+
+``_via_tunnel()`` still 404s non-API paths carrying Cloudflare headers. The
+tunnel is not in use (see docs/tunnel-setup.md), but the backstop costs nothing
+and keeps the page LAN-only if one is ever turned on.
 """
 from __future__ import annotations
 
@@ -29,8 +32,15 @@ from musi.api import auth
 PORT = 8080
 AUDIO_EXT = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".opus", ".wma", ".ape"}
 
-# Origins allowed to call /api/v1 from a browser (comma-separated env override).
-DEFAULT_CORS_ORIGINS = "https://musiweb.base44.app"
+# Origins allowed to call /api/v1 from a *cross-origin* browser page
+# (comma-separated env override, plus the api-origins file). Empty by default:
+# the management page is served from the device itself, so it is same-origin and
+# needs no CORS at all. Only add an origin here if an external site must call in.
+DEFAULT_CORS_ORIGINS = ""
+
+# The only route that does not require a token. It is the page that prompts for
+# one; it embeds no library data.
+PUBLIC_PATHS = frozenset({"/"})
 
 _STARTED = time.monotonic()
 
@@ -67,13 +77,34 @@ h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
 .status{margin-top:14px;color:#78788a;font-size:.9em;min-height:1.2em;text-align:center}
 .stats{margin-top:36px;color:#78788a;font-size:.85em}
 .stats span{color:#fff;font-weight:600}
+.gate{width:100%;max-width:480px;text-align:center}
+.gate p{color:#78788a;font-size:.9em;line-height:1.6;margin-bottom:18px}
+.gate input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid #2a2a3f;
+     background:#16162a;color:#fff;font-size:1em;font-family:inherit}
+.gate input:focus{outline:none;border-color:#ff5c8a}
+.gate button{margin-top:12px;width:100%;padding:13px;border:0;border-radius:10px;
+     background:#ff5c8a;color:#fff;font-size:1em;font-weight:600;cursor:pointer;
+     font-family:inherit}
+.gate .err{color:#ff5c8a;min-height:1.2em;margin-top:10px;font-size:.85em}
+.hide{display:none}
+.signout{margin-top:28px;background:none;border:0;color:#50505f;font-size:.8em;
+     cursor:pointer;text-decoration:underline;font-family:inherit}
 </style>
 </head>
 <body>
 <h1>musi</h1>
-<p class="sub">WiFi Transfer</p>
+<p class="sub">Library</p>
 
-<div class="drop" id="drop" onclick="document.getElementById('fi').click()">
+<div class="gate" id="gate">
+  <p>Enter the device token to continue.<br>
+     It's on the device under <b>Settings → API</b>.</p>
+  <input type="password" id="tok" placeholder="Device token" autocomplete="off"
+         autocapitalize="off" spellcheck="false">
+  <button onclick="saveToken()">Unlock</button>
+  <div class="err" id="gerr"></div>
+</div>
+
+<div class="drop hide" id="drop" onclick="document.getElementById('fi').click()">
   <svg width="44" height="44" viewBox="0 0 24 24" fill="none"
        stroke="#ff5c8a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
@@ -89,14 +120,66 @@ h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
 
 <div class="bar-wrap" id="bw"><div class="bar" id="bar"></div></div>
 <div class="status" id="st"></div>
-<div class="stats">Library: <span id="tc">…</span> tracks</div>
+<div class="stats hide" id="stats">Library: <span id="tc">…</span> tracks</div>
+<button class="signout hide" id="so" onclick="signOut()">Forget token</button>
 
 <script>
 const drop=document.getElementById('drop'),
       fi=document.getElementById('fi'),
       bw=document.getElementById('bw'),
       bar=document.getElementById('bar'),
-      st=document.getElementById('st');
+      st=document.getElementById('st'),
+      gate=document.getElementById('gate'),
+      gerr=document.getElementById('gerr'),
+      stats=document.getElementById('stats'),
+      so=document.getElementById('so');
+
+const KEY='musi_token';
+let token=localStorage.getItem(KEY)||'';
+let timer=null;
+
+// Every call carries the bearer token; a 401 drops us back to the gate.
+async function api(path,opts){
+  opts=opts||{};
+  opts.headers=Object.assign({},opts.headers,{'Authorization':'Bearer '+token});
+  const r=await fetch(path,opts);
+  if(r.status===401){lock('Token rejected — check Settings → API on the device');throw new Error('unauthorized')}
+  return r;
+}
+
+function show(unlocked){
+  gate.classList.toggle('hide',unlocked);
+  drop.classList.toggle('hide',!unlocked);
+  stats.classList.toggle('hide',!unlocked);
+  so.classList.toggle('hide',!unlocked);
+}
+
+function lock(msg){
+  token='';localStorage.removeItem(KEY);
+  if(timer){clearInterval(timer);timer=null}
+  show(false);gerr.textContent=msg||'';
+}
+
+function signOut(){lock('')}
+
+async function unlock(){
+  try{
+    const r=await api('/stats');
+    const d=await r.json();
+    document.getElementById('tc').textContent=d.tracks;
+    localStorage.setItem(KEY,token);
+    gerr.textContent='';
+    show(true);
+    if(!timer)timer=setInterval(fetchStats,5000);
+  }catch(e){/* lock() already ran on 401 */}
+}
+
+function saveToken(){
+  const v=document.getElementById('tok').value.trim();
+  if(!v){gerr.textContent='Enter the token first';return}
+  token=v;document.getElementById('tok').value='';
+  unlock();
+}
 
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over')});
 drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
@@ -107,16 +190,18 @@ async function upload(files){
   if(!files.length)return;
   bw.style.display='block';bar.style.width='0';
   let ok=0,skip=0,locked=false;
-  for(let i=0;i<files.length;i++){
-    const f=files[i];
-    st.textContent='Uploading '+f.name+' ('+(i+1)+'/'+files.length+')…';
-    const fd=new FormData();fd.append('file',f);
-    const r=await fetch('/upload',{method:'POST',body:fd});
-    if(r.status===423){locked=true;break}
-    const d=await r.json();
-    if(d.status==='ok')ok++;else skip++;
-    bar.style.width=((i+1)/files.length*100)+'%';
-  }
+  try{
+    for(let i=0;i<files.length;i++){
+      const f=files[i];
+      st.textContent='Uploading '+f.name+' ('+(i+1)+'/'+files.length+')…';
+      const fd=new FormData();fd.append('file',f);
+      const r=await api('/upload',{method:'POST',body:fd});
+      if(r.status===423){locked=true;break}
+      const d=await r.json();
+      if(d.status==='ok')ok++;else skip++;
+      bar.style.width=((i+1)/files.length*100)+'%';
+    }
+  }catch(e){st.textContent='';return}
   if(locked){
     st.innerHTML='<span style="color:#ff5c8a">✗</span> Storage is locked — unlock in Settings → Power on the device';
     return;
@@ -129,10 +214,12 @@ async function upload(files){
 }
 
 async function fetchStats(){
-  try{const r=await fetch('/stats');const d=await r.json();
+  try{const r=await api('/stats');const d=await r.json();
   document.getElementById('tc').textContent=d.tracks;}catch(e){}
 }
-fetchStats();setInterval(fetchStats,5000);
+
+show(false);
+if(token)unlock();          // remembered token: verify it, then reveal the page
 </script>
 </body>
 </html>
@@ -261,11 +348,10 @@ def create_app(
 
     @app.before_request
     def _gate():
-        if not request.path.startswith("/api/"):
-            # Legacy LAN-only routes (/, /upload, /stats) are tokenless —
-            # never serve them to internet traffic from the tunnel.
-            if _via_tunnel():
-                return jsonify(error="not found"), 404
+        # The management page is LAN-only; never serve it to tunnel traffic.
+        if _via_tunnel() and not request.path.startswith("/api/"):
+            return jsonify(error="not found"), 404
+        if request.path in PUBLIC_PATHS:
             return None
         if request.method == "OPTIONS":       # CORS preflight carries no auth
             return app.make_default_options_response()
@@ -313,12 +399,8 @@ def create_app(
 
     @app.route("/upload", methods=["POST"])
     def upload():
-        # The server now runs even while the storage lock is on — uploads
-        # would land in the RAM overlay and vanish, so refuse them here.
-        # (/api/v1 writes are blocked centrally in _gate; this legacy route
-        # bypasses that gate.)
-        if _storage_locked():
-            return _locked_response()
+        # Auth and the storage lock are both enforced centrally in _gate now
+        # that this route is no longer exempt from it.
         return _handle_upload()
 
     @app.route("/stats")
@@ -420,9 +502,15 @@ def create_app(
             conn.close()
         except sqlite3.Error:
             row = None
-        if not row or not row["art_path"] or not Path(row["art_path"]).exists():
+        if not row or not row["art_path"]:
             return jsonify(error="no art"), 404
-        return send_file(row["art_path"], max_age=3600)
+        # Only ever serve files out of the art cache. Nothing writes an art_path
+        # outside art_dir today, but this route would happily read any absolute
+        # path the DB named — the delete path already guards this way.
+        art_path = Path(row["art_path"])
+        if art_path.parent != art_dir or not art_path.exists():
+            return jsonify(error="no art"), 404
+        return send_file(art_path, max_age=3600)
 
     # ── /api/v1 writes (auth + storage lock enforced in _gate) ────────────────
 

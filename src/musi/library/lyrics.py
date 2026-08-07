@@ -43,13 +43,21 @@ class Lyrics:
     error: str = ""
 
 
+# A synced lyric file is a few KB. Cap the read so a hostile or broken endpoint
+# can't stream the 512MB Zero W out of memory.
+_MAX_BYTES = 2 * 1024 * 1024
+
+
 def _http_get(url: str, *, timeout: float = _TIMEOUT) -> bytes | None:
     """GET url. Returns None on a 404 (a real 'no lyrics'); raises otherwise."""
     req = urllib.request.Request(url, headers={
         "User-Agent": _UA, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+            body = resp.read(_MAX_BYTES + 1)
+            if len(body) > _MAX_BYTES:
+                raise ValueError(f"lyrics response over {_MAX_BYTES} bytes")
+            return body
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None                      # definitive: LRCLIB has nothing

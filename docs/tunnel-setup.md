@@ -141,7 +141,10 @@ On the website (Vercel) side:
   systemctl --user restart musi-api    # origins are read at startup
   ```
 
-  (The default allowlist already contains https://musiweb.base44.app.)
+  (The default allowlist is now **empty** — the management page is served by
+  the device itself and is same-origin, so it needs no CORS entry. Add one only
+  if an external site must call the API. The tunnel is not in use; see
+  docs/ota-signing.md and the security notes in src/musi/api/server.py.)
 
 ## Notes / gotchas
 

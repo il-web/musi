@@ -22,11 +22,24 @@ def main() -> None:
 
     auth.load_token()   # generate the token file on first boot
     app = create_app(music_root(), db_path(), art_dir())
+    log = logging.getLogger(__name__)
 
-    import werkzeug.serving
-    server = werkzeug.serving.make_server("0.0.0.0", PORT, app, threaded=True)
-    logging.getLogger(__name__).info("musi API listening on :%d", PORT)
-    server.serve_forever()
+    # waitress is a real WSGI server; werkzeug's is a development server that
+    # its own docs tell you not to expose. Fall back only so a dev checkout
+    # without waitress still runs.
+    try:
+        from waitress import serve
+    except ImportError:
+        log.warning("waitress not installed — falling back to the werkzeug "
+                    "development server (install waitress on the device)")
+        import werkzeug.serving
+        server = werkzeug.serving.make_server("0.0.0.0", PORT, app, threaded=True)
+        log.info("musi API listening on :%d", PORT)
+        server.serve_forever()
+        return
+
+    log.info("musi API listening on :%d", PORT)
+    serve(app, host="0.0.0.0", port=PORT, threads=4, ident="musi")
 
 
 if __name__ == "__main__":
