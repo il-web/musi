@@ -42,6 +42,15 @@ DEFAULT_CORS_ORIGINS = ""
 # one; it embeds no library data.
 PUBLIC_PATHS = frozenset({"/"})
 
+# Login throttle. The token is 8 characters (32**8 ≈ 1.1e12) — short enough to
+# type off the device screen, which is only safe because guessing is throttled.
+# After FAIL_FREE wrong tokens from one address, each further attempt is locked
+# out for a doubling delay. Don't remove this without lengthening the token.
+FAIL_FREE   = 5           # wrong attempts allowed before throttling kicks in
+LOCK_BASE_S = 30.0        # first lockout; doubles per failure after that
+LOCK_MAX_S  = 3600.0      # ceiling on a single lockout
+FAIL_TTL_S  = 86400.0     # forget an idle address after a day
+
 _STARTED = time.monotonic()
 
 # Silence Flask's request logger so it doesn't spam the journal
@@ -98,8 +107,8 @@ h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
 <div class="gate" id="gate">
   <p>Enter the device token to continue.<br>
      It's on the device under <b>Settings → API</b>.</p>
-  <input type="password" id="tok" placeholder="Device token" autocomplete="off"
-         autocapitalize="off" spellcheck="false">
+  <input type="text" id="tok" placeholder="XXXX-XXXX" autocomplete="off"
+         autocapitalize="characters" spellcheck="false" maxlength="16">
   <button onclick="saveToken()">Unlock</button>
   <div class="err" id="gerr"></div>
 </div>
@@ -144,6 +153,11 @@ async function api(path,opts){
   opts.headers=Object.assign({},opts.headers,{'Authorization':'Bearer '+token});
   const r=await fetch(path,opts);
   if(r.status===401){lock('Token rejected — check Settings → API on the device');throw new Error('unauthorized')}
+  if(r.status===429){
+    const s=r.headers.get('Retry-After')||'a while';
+    lock('Too many wrong tokens — wait '+s+'s and try again');
+    throw new Error('throttled');
+  }
   return r;
 }
 
@@ -311,6 +325,54 @@ def _cors_origins() -> "set[str]":
     return origins
 
 
+class LoginThrottle:
+    """Per-address lockout for wrong tokens.
+
+    In-memory and per-process, which is the right scope here: one device, one
+    API service, and a restart clearing the counters is not a weakness worth
+    a database. Entries are keyed on the peer address; behind a proxy every
+    request would share one key, so this must stay a directly-exposed server.
+    """
+
+    def __init__(self) -> None:
+        self._fails: dict[str, tuple[int, float]] = {}   # addr -> (count, until)
+        self._lock = threading.Lock()
+
+    def retry_after(self, addr: str, now: float | None = None) -> float:
+        """Seconds this address must wait, or 0.0 if it may try now."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            count, until = self._fails.get(addr, (0, 0.0))
+            return max(0.0, until - now)
+
+    def record_failure(self, addr: str, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            self._prune(now)
+            count, _ = self._fails.get(addr, (0, 0.0))
+            count += 1
+            if count < FAIL_FREE:
+                until = 0.0
+            else:
+                # The FAIL_FREE'th failure is itself the one that locks: the
+                # gate checks retry_after *before* recording, so the caller
+                # gets exactly FAIL_FREE tries and the next one is refused.
+                delay = min(LOCK_BASE_S * (2 ** (count - FAIL_FREE)), LOCK_MAX_S)
+                until = now + delay
+            self._fails[addr] = (count, until)
+
+    def record_success(self, addr: str) -> None:
+        with self._lock:
+            self._fails.pop(addr, None)
+
+    def _prune(self, now: float) -> None:
+        """Drop addresses idle for a day so the dict can't grow without bound."""
+        stale = [a for a, (_, until) in self._fails.items()
+                 if until and until + FAIL_TTL_S < now]
+        for a in stale:
+            del self._fails[a]
+
+
 def _via_tunnel() -> bool:
     """True when the request arrived through the Cloudflare Tunnel.
     cloudflared talks to us on localhost, so the remote address can't tell
@@ -336,6 +398,7 @@ def create_app(
     get_token = token_provider or auth.load_token
     origins   = cors_origins if cors_origins is not None else _cors_origins()
     debouncer = RescanDebouncer(music_root, art_dir, db_path)
+    throttle  = LoginThrottle()
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 256 * 1024 * 1024  # 256 MB
@@ -355,11 +418,27 @@ def create_app(
             return None
         if request.method == "OPTIONS":       # CORS preflight carries no auth
             return app.make_default_options_response()
+
+        addr = request.remote_addr or "?"
+        wait = throttle.retry_after(addr)
+        if wait > 0:
+            resp = jsonify(error="too many attempts",
+                           hint="wrong token — wait before trying again")
+            return resp, 429, {"Retry-After": str(int(wait) + 1)}
+
         supplied = request.headers.get("Authorization", "")
-        if not (supplied.startswith("Bearer ") and hmac.compare_digest(
-            supplied[7:].strip(), get_token()
+        # Compared in canonical form: the token is typed by hand off the device
+        # screen, so case and the display dash must not matter. `expected` is
+        # checked for emptiness first — normalize() returns '' for junk, and
+        # compare_digest('', '') is True, so a missing token file would
+        # otherwise authenticate everyone.
+        expected = auth.normalize(get_token())
+        if not expected or not (supplied.startswith("Bearer ") and hmac.compare_digest(
+            auth.normalize(supplied[7:]), expected
         )):
+            throttle.record_failure(addr)
             return jsonify(error="unauthorized"), 401
+        throttle.record_success(addr)
         # Storage lock (read-only overlay root) — refuse every write
         if request.method in ("POST", "PUT", "PATCH", "DELETE") and _storage_locked():
             return _locked_response()

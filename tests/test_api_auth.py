@@ -23,9 +23,49 @@ def test_regenerate_changes_the_token(tmp_path):
     assert auth.regenerate_token(path) != first
 
 
-def test_token_has_enough_entropy(tmp_path):
-    # token_urlsafe(24) → 24 random bytes, ~32 chars base64url
-    assert len(auth.load_token(tmp_path / "api-token")) >= 30
+def test_token_is_short_and_typeable(tmp_path):
+    """8 chars grouped as XXXX-XXXX — readable off a 3.5" screen."""
+    token = auth.load_token(tmp_path / "api-token")
+    assert len(token) == 9 and token[4] == "-"
+    assert len(auth.normalize(token)) == auth.TOKEN_LEN
+
+
+def test_token_alphabet_has_no_look_alikes(tmp_path):
+    """0/O and 1/I are indistinguishable on the device font — and this token
+    gets copied by eye, so they must not appear at all."""
+    for _ in range(200):
+        token = auth.normalize(auth.regenerate_token(tmp_path / "api-token"))
+        assert not (set(token) & set("01IO")), token
+        assert set(token) <= set(auth.ALPHABET)
+
+
+def test_normalize_accepts_however_the_user_types_it():
+    assert auth.normalize("k7rm-92fq") == "K7RM92FQ"
+    assert auth.normalize("K7RM 92FQ") == "K7RM92FQ"
+    assert auth.normalize("K7RM92FQ")  == "K7RM92FQ"
+
+
+def test_normalize_rejects_junk():
+    """Junk must not normalize to something that could match a real token."""
+    assert auth.normalize("") == ""
+    assert auth.normalize("!!!") == ""
+    assert auth.normalize("0110") == ""      # every char is a dropped look-alike
+
+
+def test_old_long_tokens_are_replaced(tmp_path):
+    """Pre-existing 32-char urlsafe tokens are secure but unusable without a
+    keyboard, so they upgrade to the short format on next load."""
+    path = tmp_path / "api-token"
+    path.write_text("Xk3_long-legacy-token-abcdefghijklmno\n")
+    token = auth.load_token(path)
+    assert auth.is_canonical(token)
+    assert token == path.read_text().strip()   # persisted, not just returned
+
+
+def test_a_canonical_token_is_left_alone(tmp_path):
+    path = tmp_path / "api-token"
+    first = auth.load_token(path)
+    assert auth.load_token(path) == first
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")

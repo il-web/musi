@@ -1,6 +1,7 @@
 """Settings → API screen — device API token, server URL and service state.
 
-The token gates every /api/v1 request (the musi website asks for it once).
+The token gates every route except the page at "/" itself. It is read off
+this screen and typed into http://musi.local:8080 — hence the short format.
 Regenerating takes effect immediately: the server re-reads the token file on
 each request, so no service restart is needed.
 """
@@ -91,7 +92,7 @@ class ApiSettingsScreen(Screen):
             self._token = auth.regenerate_token()
 
         self.app.push(ContextMenuScreen(
-            self.app, "New token? Site must re-enter it", [
+            self.app, "New token? Browsers must re-enter it", [
                 ("Regenerate", do_regen),
                 ("Cancel",     lambda: None),
             ]))
@@ -132,12 +133,14 @@ class ApiSettingsScreen(Screen):
         surface.blit(label, (14, 176))
         pygame.draw.rect(surface, theme.CARD_BG,
                          pygame.Rect(10, 192, 300, 78), border_radius=8)
-        half = (len(self._token) + 1) // 2
-        for i, part in enumerate((self._token[:half], self._token[half:])):
-            part_s = theme.render(part, 13, theme.WHITE, max_width=280)
-            surface.blit(part_s, (24, 206 + i * 26))
+        # The token is 8 chars shown as XXXX-XXXX — it fits on one line, so set
+        # it large and centred. This is read off the screen and typed by hand on
+        # a phone, so legibility is the whole job of this card.
+        token_s = theme.render(self._token, 26, theme.WHITE, bold=True,
+                               max_width=280)
+        surface.blit(token_s, token_s.get_rect(centerx=160, centery=231))
 
-        hint = theme.render("Enter this token on the musi website", 10, theme.DIM)
+        hint = theme.render("Enter this at musi.local:8080", 10, theme.DIM)
         surface.blit(hint, hint.get_rect(centerx=160, y=282))
 
         # ── regenerate button ─────────────────────────────────────────────────

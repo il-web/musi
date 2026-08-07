@@ -18,6 +18,29 @@ _MP3_BYTES = (b"\xff\xfb\x10\xc0" + b"\x00" * 100) * 20
 
 
 @pytest.fixture
+def client_factory(tmp_path):
+    """Build a test client over the seeded library, overriding app kwargs.
+
+    Each call returns a client with its OWN app, so per-app state (the login
+    throttle) doesn't leak between assertions in a single test.
+    """
+    def make(**kwargs):
+        (tmp_path / "music").mkdir(exist_ok=True)
+        (tmp_path / "art").mkdir(exist_ok=True)
+        opts = {"token_provider": lambda: TOKEN, "cors_origins": {ORIGIN}}
+        opts.update(kwargs)
+        app = create_app(tmp_path / "music", tmp_path / "library.db",
+                         tmp_path / "art", **opts)
+        app.testing = True
+        c = app.test_client()
+        c.music_root = tmp_path / "music"
+        c.art_dir    = tmp_path / "art"
+        c.db_path    = tmp_path / "library.db"
+        return c
+    return make
+
+
+@pytest.fixture
 def client(tmp_path):
     music = tmp_path / "music"
     art   = tmp_path / "art"
@@ -64,12 +87,48 @@ def test_api_requires_token(client):
                       headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
+def test_token_comparison_ignores_case_and_dashes(client):
+    """The token is typed by hand off the device screen, so 'k7rm-92fq' and
+    'K7RM92FQ' must both work."""
+    from musi.api import auth
+    canon = auth.normalize(TOKEN)
+    for variant in (canon, canon.lower(), auth.format_token(canon),
+                    auth.format_token(canon).lower()):
+        r = client.get("/api/v1/status",
+                       headers={"Authorization": f"Bearer {variant}"})
+        assert r.status_code == 200, variant
+
+
+def test_repeated_wrong_tokens_get_throttled(client):
+    """The 8-char token is only safe because guessing is rate limited."""
+    from musi.api.server import FAIL_FREE
+    bad = {"Authorization": "Bearer WRNGWRNG"}
+    for _ in range(FAIL_FREE):
+        assert client.get("/api/v1/status", headers=bad).status_code == 401
+    r = client.get("/api/v1/status", headers=bad)
+    assert r.status_code == 429
+    assert int(r.headers["Retry-After"]) > 0
+    # the throttle must not lock out a caller holding the right token
+    assert client.get("/api/v1/status", headers=AUTH).status_code == 429
+
+
+def test_empty_token_file_authenticates_nobody(tmp_path, client_factory):
+    """normalize() returns '' for junk and compare_digest('','') is True — a
+    missing or corrupt token file must not open the device to everyone."""
+    c = client_factory(token_provider=lambda: "")
+    assert c.get("/api/v1/status").status_code == 401
+    assert c.get("/api/v1/status",
+                 headers={"Authorization": "Bearer "}).status_code == 401
+    assert c.get("/api/v1/status",
+                 headers={"Authorization": "Bearer !!!"}).status_code == 401
+
+
 def test_only_the_page_itself_is_public(client):
     """/ is public because it is the form that asks for the token; everything
     it calls needs one. 'On the LAN' includes every other device on the WiFi."""
     page = client.get("/")
     assert page.status_code == 200
-    assert b"Device token" in page.data
+    assert b"Enter the device token" in page.data
 
     assert client.get("/stats").status_code == 401
     assert client.get("/stats", headers=AUTH).get_json() == {"tracks": 2}
