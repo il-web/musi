@@ -4,12 +4,20 @@ The Pi runs the player from a git clone of the project repo. This module checks
 GitHub for newer commits and, on request, pulls them and restarts the app's
 systemd user service so the new code takes over.
 
+**The incoming commit must carry a good GPG signature before anything is
+applied.** Without that check, whoever controls the GitHub account controls
+every device — the pull runs update.sh, which escalates to root. The Pi needs
+the signing public key imported and trusted in its own keyring; see
+docs/ota-signing.md. Set MUSI_ALLOW_UNSIGNED=1 to bypass (dev machines only —
+it disables the only defence against a repo compromise).
+
 All git/network calls are best-effort and never raise — they return a small
 result dict the UI can display.
 """
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -32,10 +40,11 @@ class UpdateStatus:
     is_repo:  bool = True     # False if not a git checkout
     error:    str  = ""       # human-readable problem, if any
     changelog: list[str] = field(default_factory=list)  # incoming commit subjects
+    signed:   bool = True     # incoming commit carries a trusted signature
 
     @property
     def available(self) -> bool:
-        return self.is_repo and not self.error and self.behind > 0
+        return self.is_repo and not self.error and self.behind > 0 and self.signed
 
 
 def _git(*args: str, timeout: float = 30.0) -> tuple[int, str]:
@@ -57,6 +66,29 @@ def _git(*args: str, timeout: float = 30.0) -> tuple[int, str]:
 def _is_git_repo() -> bool:
     rc, _ = _git("rev-parse", "--is-inside-work-tree", timeout=5)
     return rc == 0
+
+
+def allow_unsigned() -> bool:
+    """True when signature enforcement is deliberately disabled (dev only)."""
+    return os.environ.get("MUSI_ALLOW_UNSIGNED") == "1"
+
+
+def verify_signature(rev: str) -> tuple[bool, str]:
+    """Check that ``rev`` carries a good GPG signature from a trusted key.
+
+    ``git verify-commit`` exits non-zero for an absent signature, a bad one, or
+    a signature by a key the local keyring doesn't trust — all three are
+    refusals, and all three mean we don't run the code.
+    """
+    if allow_unsigned():
+        logging.warning("MUSI_ALLOW_UNSIGNED=1 — skipping signature check on %s", rev)
+        return True, "signature check disabled"
+    rc, out = _git("verify-commit", rev, timeout=30)
+    if rc == 0:
+        return True, "signature ok"
+    if rc == 127:
+        return False, "git not installed"
+    return False, out.splitlines()[-1] if out else "no valid signature"
 
 
 def current_version() -> str:
@@ -96,6 +128,11 @@ def check() -> UpdateStatus:
                        f"HEAD..{upstream}", timeout=10)
         if rc == 0:
             st.changelog = [ln for ln in out.splitlines() if ln.strip()]
+        # Refuse to advertise an update we would refuse to install.
+        ok, why = verify_signature(upstream)
+        if not ok:
+            st.signed = False
+            st.error  = f"Update rejected: {why}"
     return st
 
 
@@ -114,6 +151,20 @@ def apply(progress: "Callable[[float, str], None] | None" = None) -> tuple[bool,
     step(0.08, "Preparing…")
     if not _is_git_repo():
         return False, "Not a git checkout"
+
+    # Verify BEFORE the working tree moves. A pull would put unverified code on
+    # disk, and update.sh runs with sudo rights — by then it is already too late.
+    step(0.12, "Verifying signature…")
+    rc, out = _git("fetch", "--quiet", timeout=45)
+    if rc != 0:
+        return False, out or "fetch failed (no network?)"
+    rc, upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                        "@{u}", timeout=5)
+    if rc != 0:
+        upstream = "origin/main"
+    ok, why = verify_signature(upstream)
+    if not ok:
+        return False, f"Refused: {why}"
 
     step(0.15, "Downloading…")
     rc, out = _git("pull", "--ff-only", timeout=120)

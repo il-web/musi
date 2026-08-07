@@ -14,6 +14,11 @@ art_cache/
 music/
 .env
 
+# OTA signing public key — safe to publish, but deliberately NOT committed:
+# it must reach the Pi out-of-band (scp), not through the repo it protects.
+# Re-export any time: gpg --armor --export 52BA31D3E4F34050
+musi-signing.pub
+
 # local dev artifacts (machine-specific)
 dev.env
 dev_art/
