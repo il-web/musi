@@ -10,9 +10,8 @@ that asks for the token — it holds no data of its own. Uploads and stats used
 to be tokenless for LAN convenience; they aren't any more, because "on the LAN"
 includes every guest phone and IoT gadget on the same WiFi.
 
-``_via_tunnel()`` still 404s non-API paths carrying Cloudflare headers. The
-tunnel is not in use (see docs/tunnel-setup.md), but the backstop costs nothing
-and keeps the page LAN-only if one is ever turned on.
+The API is LAN-only: nothing exposes it to the internet, so the token is the
+whole access boundary.
 """
 from __future__ import annotations
 
@@ -373,16 +372,6 @@ class LoginThrottle:
             del self._fails[a]
 
 
-def _via_tunnel() -> bool:
-    """True when the request arrived through the Cloudflare Tunnel.
-    cloudflared talks to us on localhost, so the remote address can't tell
-    LAN from internet — but Cloudflare always adds these headers. The tunnel
-    ingress only forwards /api/* anyway (see pi/cloudflared-config.yml);
-    this is the in-app backstop for the legacy tokenless routes."""
-    return bool(request.headers.get("Cf-Ray")
-                or request.headers.get("CF-Connecting-IP"))
-
-
 # ── app factory ───────────────────────────────────────────────────────────────
 
 def create_app(
@@ -411,9 +400,6 @@ def create_app(
 
     @app.before_request
     def _gate():
-        # The management page is LAN-only; never serve it to tunnel traffic.
-        if _via_tunnel() and not request.path.startswith("/api/"):
-            return jsonify(error="not found"), 404
         if request.path in PUBLIC_PATHS:
             return None
         if request.method == "OPTIONS":       # CORS preflight carries no auth

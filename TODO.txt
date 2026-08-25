@@ -153,8 +153,8 @@ NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 --------------------------------------------------------------
 Goal: musi website (moving base44 -> Vercel) browses + manages the library
 remotely. Library management only, NO playback control. Remote transport =
-Cloudflare Tunnel (needs a domain on a free Cloudflare account; must use
-the cloudflared-linux-arm build — armhf crashes on the Zero W's ARMv6).
+UNDECIDED — the Cloudflare Tunnel plan was dropped 2026-08-25 before it ever
+went live. The API is LAN-only until something replaces it.
 
 [x] API pack 2 — writes  (+ WiFi Transfer button removed from Home)
     - POST /api/v1/upload (shared logic with legacy /upload, token-gated),
@@ -172,19 +172,15 @@ the cloudflared-linux-arm build — armhf crashes on the Zero W's ARMv6).
     - Fixed latent art.py crash: solid-colour covers made _extract_palette
       IndexError (quantize returns short palettes)
 
-[x] API pack 3 — remote (Cloudflare Tunnel) — code + docs side
-    - update.sh root step 3 / install.sh 9e: pinned cloudflared 2026.6.1,
-      generic linux-arm build ONLY (armhf = "illegal instruction" on ARMv6);
-      download failure warns but never blocks the update
-    - Legacy tokenless routes (/, /upload, /stats) are now double-locked
-      from the internet: tunnel ingress only forwards /api/* AND the app
-      404s any request carrying Cloudflare headers (Cf-Ray/CF-Connecting-IP)
+[-] API pack 3 — remote (Cloudflare Tunnel) — REMOVED 2026-08-25, never
+    went live (no domain was ever pointed at it). Deleted: the cloudflared
+    download in install.sh + update.sh root step 3, pi/cloudflared-config.yml,
+    docs/tunnel-setup.md, and the _via_tunnel() CF-header backstop in
+    api/server.py. update.sh keeps LATEST_STEP=3 so the retired number is
+    never reused — the next pack is step 4.
+    KEPT from that pack (not tunnel-specific):
     - CORS origins also read from ~/.local/share/musi/api-origins (one per
       line, read at service start) — site domain changes need no code edit
-    - pi/cloudflared-config.yml template + docs/tunnel-setup.md runbook
-    - STILL MANUAL (needs Ilay's domain on Cloudflare first):
-      cloudflared tunnel login / create musi / route dns / config +
-      service install — follow docs/tunnel-setup.md end to end
 
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
     6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)
