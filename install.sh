@@ -72,19 +72,25 @@ banner
 # ── 1. packages ───────────────────────────────────────────────────────────────
 say "Installing packages"
 sudo apt-get update -qq
-# libgl1-mesa-dri / libegl1 / libgbm1 are NOT optional, and are easy to miss:
-# Raspberry Pi OS Lite 64-bit ships none of them. SDL2's KMSDRM backend needs
-# EGL+GBM, and a display-only SPI panel needs Mesa's kmsro driver
-# (panel-mipi-dbi_dri.so) to borrow the VideoCore render node. Without these the
-# UI dies at startup with "pygame.error: EGL not initialized" while every other
-# check -- driver bound, /dev/fb1 present, correct pin muxing -- looks perfect.
-# The 32-bit image happened to include them, so this only bites on arm64.
+# libgl1-mesa-dri / libegl1 / libgbm1 / libgles2 are NOT optional, and are easy
+# to miss: Raspberry Pi OS Lite 64-bit ships none of them. SDL2's KMSDRM backend
+# needs EGL+GBM, and a display-only SPI panel needs Mesa's kmsro driver
+# (panel-mipi-dbi_dri.so) to borrow the VideoCore render node.
+#
+# libgles2 is the one that hides: SDL_EGL_LoadLibrary() dlopens libEGL AND
+# libGLESv2, and if the GLESv2 load fails every later call reports the generic
+# "pygame.error: EGL not initialized" -- pointing at EGL, which is fine. A direct
+# eglInitialize() on the same device succeeds, because it never touches GLESv2.
+# Meanwhile every other check -- driver bound, framebuffer present, correct pin
+# muxing, no dmesg errors -- looks perfect.
+#
+# The 32-bit image happened to include all of these, so this only bites on arm64.
 sudo apt-get install -y --no-install-recommends \
     git mpd mpc \
     python3 python3-pip python3-venv \
     fonts-dejavu-core \
     libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-mixer-2.0-0 \
-    libgl1-mesa-dri libegl1 libgbm1 \
+    libgl1-mesa-dri libegl1 libgbm1 libgles2 \
     bluez bluez-tools bluez-alsa-utils \
     plymouth plymouth-themes \
     i2c-tools device-tree-compiler \
