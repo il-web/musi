@@ -1,0 +1,36 @@
+/*
+ * musi capacitive touch overlay -- FocalTech FT5x06/FT6236 on I2C1 @ 0x38.
+ *
+ * VERBATIM RECOVERY from the original Pi Zero W card (2026-06-19), pulled
+ * off that card 2026-08-25. Compiles to 680 bytes.
+ *
+ * Build:
+ *   dtc -@ -I dts -O dtb -o ft5x06-musi.dtbo pi/config/ft5x06-musi.dts
+ *   sudo install -m 0644 ft5x06-musi.dtbo /boot/firmware/overlays/
+ *   # config.txt:  dtoverlay=ft5x06-musi        (needs i2c-dev in /etc/modules)
+ */
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2835";
+
+    fragment@0 {
+        target = <&i2c1>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "okay";
+
+            ft5x06@38 {
+                compatible = "edt,edt-ft5x06";
+                reg = <0x38>;
+                interrupt-parent = <&gpio>;
+                interrupts = <27 2>;          /* GPIO27 (CTP INT), falling edge */
+                reset-gpios = <&gpio 22 1>;   /* GPIO22 (CTP RST), active low */
+                touchscreen-size-x = <320>;
+                touchscreen-size-y = <480>;
+            };
+        };
+    };
+};

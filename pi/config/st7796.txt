@@ -1,0 +1,49 @@
+# ST7796 init sequence for the musi 3.5" 320x480 SPI panel.
+#
+# VERBATIM RECOVERY of the known-good sequence from the original Pi Zero W
+# card (2026-06-19), pulled off that card on 2026-08-25. Compiles to exactly
+# 114 bytes. Do NOT "improve" this file -- a hand-reconstructed variant with
+# a leading SWRESET and a late 0x21 produced a dead panel.
+#
+# Build:
+#   git clone https://github.com/notro/panel-mipi-dbi
+#   panel-mipi-dbi/mipi-dbi-cmd panel.bin pi/config/st7796.txt
+#   sudo install -m 0644 panel.bin /lib/firmware/panel.bin
+#
+# Matching config.txt lines (NOTE: no "write-only" parameter):
+#   dtoverlay=mipi-dbi-spi,spi0-0,speed=40000000
+#   dtparam=width=320,height=480,reset-gpio=25,dc-gpio=24,backlight-gpio=12
+
+
+
+command 0x11                 # Sleep Out
+delay 120
+
+command 0xF0 0xC3            # Command Set Control - enable part 1
+command 0xF0 0x96            # Command Set Control - enable part 2
+
+command 0x36 0x48            # Memory Access Control: MX + BGR (320x480 portrait)
+command 0x3A 0x55            # Pixel Format: 16 bpp (RGB565)
+command 0x21                 # Display Inversion ON (fixes negative colors)
+
+command 0xB4 0x01            # Column Inversion
+command 0xB6 0x80 0x02 0x3B  # Display Function Control
+
+command 0xE8 0x40 0x8A 0x00 0x00 0x29 0x19 0xA5 0x33   # Display Output Ctrl Adjust
+
+command 0xC1 0x06            # Power Control 2
+command 0xC2 0xA7            # Power Control 3
+command 0xC5 0x18            # VCOM Control
+delay 120
+
+command 0xE0 0xF0 0x09 0x0B 0x06 0x04 0x15 0x2F 0x54 0x42 0x3C 0x17 0x14 0x18 0x1B   # Positive Gamma
+command 0xE1 0xF0 0x09 0x0B 0x06 0x04 0x03 0x2D 0x43 0x42 0x3B 0x16 0x14 0x17 0x1B   # Negative Gamma
+delay 120
+
+command 0xF0 0x3C            # Command Set Control - disable part 1
+command 0xF0 0x69            # Command Set Control - disable part 2
+delay 120
+
+command 0x29                 # Display On
+delay 50
+
