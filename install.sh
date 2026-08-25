@@ -166,6 +166,11 @@ sudo plymouth-set-default-theme musi 2>/dev/null || true
 sudo update-initramfs -u 2>/dev/null || true
 echo "  NOTE: add 'quiet splash plymouth.ignore-serial-consoles fbcon=map:10' to"
 echo "        /boot/firmware/cmdline.txt (one line) for the splash at boot."
+echo "  IMPORTANT: 'fbcon=map:10' is NOT just cosmetic. It maps the console onto"
+echo "        the SPI panel, which is what enables the DRM pipeline at boot. On a"
+echo "        clean Raspberry Pi OS install with nothing else driving the panel,"
+echo "        writes to /dev/fb1 land in a buffer that is never scanned out and"
+echo "        the screen stays dark even though the driver loaded without error."
 
 # ── 9b. backlight permissions (screen dim/off) ────────────────────────────────
 say "[9b] Backlight write access for screen auto-off"
