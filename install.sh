@@ -20,29 +20,94 @@ USER_NAME="$(id -un)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MUSIC_DIR="$HOME/music"
 
-say() { printf '\n\033[1;35m=== %s\033[0m\n' "$1"; }
+# `systemctl --user` needs the user bus. Over a bare `ssh host 'bash install.sh'`
+# neither XDG_RUNTIME_DIR nor DBUS_SESSION_BUS_ADDRESS is set, and every user-unit
+# call dies with "Failed to connect to user scope bus via local transport".
+# Set them ourselves so the install works from any kind of shell.
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR
+: "${DBUS_SESSION_BUS_ADDRESS:=unix:path=$XDG_RUNTIME_DIR/bus}"
+export DBUS_SESSION_BUS_ADDRESS
+
+# ── presentation ──────────────────────────────────────────────────────────────
+if [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+    C_ACCENT=$'\033[38;5;170m'; C_DIM=$'\033[2m'; C_OK=$'\033[38;5;114m'
+    C_WARN=$'\033[38;5;215m'; C_BOLD=$'\033[1m'; C_OFF=$'\033[0m'
+else
+    C_ACCENT=; C_DIM=; C_OK=; C_WARN=; C_BOLD=; C_OFF=
+fi
+
+TOTAL_STEPS=10
+STEP_N=0
+
+banner() {
+    printf '\n%s' "$C_ACCENT"
+    cat <<'ART'
+    ██   ██  ██   ██   ██████   ██
+    ███ ███  ██   ██  ██        ██
+    ██ █ ██  ██   ██   █████    ██
+    ██   ██  ██   ██       ██   ██
+    ██   ██   █████   ██████    ██
+ART
+    printf '%s%s              a touchscreen music player%s\n\n' "$C_OFF" "$C_DIM" "$C_OFF"
+}
+
+# say "Title"            -> numbered step, auto-incrementing
+# say "Title" "9b"       -> explicit label for sub-steps
+say() {
+    if [ $# -ge 2 ]; then
+        label="$2"
+    else
+        STEP_N=$((STEP_N + 1))
+        label="$STEP_N/$TOTAL_STEPS"
+    fi
+    printf '\n%s%s┌─ %s %s%s\n' "$C_BOLD" "$C_ACCENT" "[$label]" "$1" "$C_OFF"
+}
+ok()   { printf '   %s✓%s %s\n' "$C_OK" "$C_OFF" "$1"; }
+info() { printf '   %s·%s %s\n' "$C_DIM" "$C_OFF" "$1"; }
+warn() { printf '   %s!%s %s%s%s\n' "$C_WARN" "$C_OFF" "$C_WARN" "$1" "$C_OFF"; }
+
+banner
 
 # ── 1. packages ───────────────────────────────────────────────────────────────
-say "[1/10] Installing packages"
+say "Installing packages"
 sudo apt-get update -qq
+# libgl1-mesa-dri / libegl1 / libgbm1 are NOT optional, and are easy to miss:
+# Raspberry Pi OS Lite 64-bit ships none of them. SDL2's KMSDRM backend needs
+# EGL+GBM, and a display-only SPI panel needs Mesa's kmsro driver
+# (panel-mipi-dbi_dri.so) to borrow the VideoCore render node. Without these the
+# UI dies at startup with "pygame.error: EGL not initialized" while every other
+# check -- driver bound, /dev/fb1 present, correct pin muxing -- looks perfect.
+# The 32-bit image happened to include them, so this only bites on arm64.
 sudo apt-get install -y --no-install-recommends \
     git mpd mpc \
     python3 python3-pip python3-venv \
     fonts-dejavu-core \
     libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-mixer-2.0-0 \
+    libgl1-mesa-dri libegl1 libgbm1 \
     bluez bluez-tools bluez-alsa-utils \
     plymouth plymouth-themes \
     i2c-tools device-tree-compiler \
     avahi-daemon
+ok "packages installed"
+
+# Sanity-check the graphics stack now rather than at first boot.
+DRI_DIR="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo "$(uname -m)-linux-gnu")/dri"
+if [ -e "$DRI_DIR/panel-mipi-dbi_dri.so" ]; then
+    ok "Mesa kmsro driver present (SPI panel can get EGL)"
+else
+    warn "panel-mipi-dbi_dri.so not found in $DRI_DIR"
+    warn "an SPI panel UI may fail with 'EGL not initialized'"
+fi
 
 # ── 2. python app ─────────────────────────────────────────────────────────────
-say "[2/10] Python virtual environment"
+say "Python virtual environment"
 python3 -m venv "$SCRIPT_DIR/.venv" --system-site-packages
 "$SCRIPT_DIR/.venv/bin/pip" install --quiet --upgrade pip
 "$SCRIPT_DIR/.venv/bin/pip" install --quiet -e "$SCRIPT_DIR"
 
 # ── 3. groups + radios ────────────────────────────────────────────────────────
-say "[3/10] User groups and Bluetooth radio"
+say "User groups and Bluetooth radio"
 for g in audio video render input bluetooth gpio i2c spi netdev; do
     sudo usermod -aG "$g" "$USER_NAME" 2>/dev/null || true
 done
@@ -50,12 +115,12 @@ sudo rfkill unblock bluetooth 2>/dev/null || true
 sudo systemctl enable --now bluetooth 2>/dev/null || true
 
 # ── 4. directories ────────────────────────────────────────────────────────────
-say "[4/10] Directories"
+say "Directories"
 mkdir -p "$MUSIC_DIR" "$HOME/.config/mpd/playlists" "$HOME/.local/bin" \
          "$HOME/.config/systemd/user"
 
 # ── 5. MPD as a user service ──────────────────────────────────────────────────
-say "[5/10] MPD (user service, output via switchable ALSA device)"
+say "MPD (user service, output via switchable ALSA device)"
 sudo systemctl mask mpd.service mpd.socket 2>/dev/null || true
 cat > "$HOME/.config/mpd/mpd.conf" <<EOF
 music_directory     "$MUSIC_DIR"
@@ -86,7 +151,7 @@ pcm.musiout {
 EOF
 
 # ── 6. Bluetooth audio (bluez-alsa) ───────────────────────────────────────────
-say "[6/10] Bluetooth audio (bluez-alsa) + pairing agent"
+say "Bluetooth audio (bluez-alsa) + pairing agent"
 sudo systemctl enable --now bluealsa 2>/dev/null || true
 
 # bluez stability policy: adapter on at boot, fast reconnect window, and
@@ -121,7 +186,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now bt-agent 2>/dev/null || true
 
 # ── 7. audio auto-router (DAC <-> Bluetooth) ──────────────────────────────────
-say "[7/10] Audio auto-router"
+say "Audio auto-router"
 install -m 0755 "$SCRIPT_DIR/pi/musi-bt-router" "$HOME/.local/bin/musi-bt-router"
 sed -i 's/\r$//' "$HOME/.local/bin/musi-bt-router"
 cat > "$HOME/.config/systemd/user/musi-bt-router.service" <<EOF
@@ -137,7 +202,7 @@ WantedBy=default.target
 EOF
 
 # ── 8. AVRCP (headphone media buttons -> MPD) ─────────────────────────────────
-say "[8/10] AVRCP media-button control"
+say "AVRCP media-button control"
 sudo apt-get install -y --no-install-recommends mpdris2 2>/dev/null || true
 cat > "$HOME/.config/systemd/user/mpris-proxy.service" <<EOF
 [Unit]
@@ -152,7 +217,7 @@ WantedBy=default.target
 EOF
 
 # ── 9. boot splash (Plymouth) ─────────────────────────────────────────────────
-say "[9/10] Boot splash"
+say "Boot splash"
 sudo mkdir -p /usr/share/plymouth/themes/musi
 sudo cp "$SCRIPT_DIR"/pi/plymouth-text/* /usr/share/plymouth/themes/musi/
 sudo cp "$SCRIPT_DIR/pi/initramfs-hook-panel" /etc/initramfs-tools/hooks/panel-firmware
@@ -173,7 +238,7 @@ echo "        writes to /dev/fb1 land in a buffer that is never scanned out and"
 echo "        the screen stays dark even though the driver loaded without error."
 
 # ── 9b. backlight permissions (screen dim/off) ────────────────────────────────
-say "[9b] Backlight write access for screen auto-off"
+say "Backlight write access for screen auto-off" "9b"
 # The panel overlay (backlight-gpio=12) exposes a gpio-backlight device; let the
 # app (video group) switch it off after inactivity. Rule applies on every boot.
 sudo tee /etc/udev/rules.d/90-musi-backlight.rules > /dev/null <<'EOF'
@@ -186,7 +251,7 @@ for b in /sys/class/backlight/*/brightness; do
 done
 
 # ── 9c. power controls (Settings → Power) ─────────────────────────────────────
-say "[9c] Power-off / reboot permission"
+say "Power-off / reboot permission" "9c"
 
 # The root half of update.sh runs from a ROOT-OWNED copy, never from the git
 # checkout. The checkout is writable by this user, so granting sudo on a script
@@ -227,7 +292,7 @@ fi
 rm -f "$TMP_SUDOERS"
 
 # ── 9d. OS hardening (SD-card protection + battery) ──────────────────────────
-say "[9d] OS hardening"
+say "OS hardening" "9d"
 # No swap: a swapfile is pure SD wear on a 512MB Zero W and useless for this app.
 sudo systemctl disable --now dphys-swapfile 2>/dev/null || true
 sudo dphys-swapfile swapoff 2>/dev/null || true
@@ -269,7 +334,7 @@ sudo systemctl reload NetworkManager 2>/dev/null || true
 # do_overlayfs, allowed via the sudoers rule above) and applies after reboot.
 
 # ── 10. services + autostart ──────────────────────────────────────────────────
-say "[10/10] Enabling services + autostart"
+say "Enabling services + autostart"
 install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"
 install -m 0644 "$SCRIPT_DIR/pi/musi-api.service" "$HOME/.config/systemd/user/musi-api.service"
 loginctl enable-linger "$USER_NAME" 2>/dev/null || true
@@ -284,16 +349,59 @@ UPDATE_LEVEL="$(sed -n 's/^LATEST_STEP=\([0-9]*\)$/\1/p' "$SCRIPT_DIR/update.sh"
 mkdir -p "$HOME/.local/share/musi"
 echo "${UPDATE_LEVEL:-0}" > "$HOME/.local/share/musi/update-level"
 
-say "Done"
+# ── final health check ────────────────────────────────────────────────────────
+say "Health check" "✓"
+if [ -e /dev/fb0 ] || [ -e /dev/fb1 ]; then
+    ok "framebuffer present"
+else
+    warn "no framebuffer — check the display overlay in config.txt"
+fi
+
+if [ -e "$DRI_DIR/panel-mipi-dbi_dri.so" ]; then
+    ok "Mesa kmsro driver"
+else
+    warn "Mesa kmsro driver MISSING — UI will not start on an SPI panel"
+fi
+
+if [ -d /sys/bus/i2c/devices/1-0038 ]; then
+    ok "touch controller answering at 0x38"
+else
+    info "no touch at 0x38 (fine if you have no touch panel)"
+fi
+
+if aplay -l 2>/dev/null | grep -qi hifiberry; then
+    ok "I2S DAC card present"
+else
+    info "no hifiberry card (Bluetooth-only output is fine)"
+fi
+
+if grep -q "fbcon=map:10" /boot/firmware/cmdline.txt 2>/dev/null; then
+    ok "fbcon=map:10 set (SPI panel gets a DRM modeset at boot)"
+else
+    warn "fbcon=map:10 MISSING from cmdline.txt — an SPI panel will stay dark"
+fi
+
+if systemctl --user is-enabled musi-ui >/dev/null 2>&1; then
+    ok "musi-ui enabled at boot"
+else
+    warn "musi-ui not enabled — autostart will not work"
+fi
+
+printf '\n%s%s' "$C_BOLD" "$C_ACCENT"
+cat <<'ART'
+   ┌──────────────────────────────────────────────┐
+   │   musi OS is installed                       │
+   └──────────────────────────────────────────────┘
+ART
+printf '%s' "$C_OFF"
 cat <<EOF
+   ${C_BOLD}1.${C_OFF} Hardware must be enabled in /boot/firmware/config.txt, and
+      cmdline.txt needs ${C_BOLD}fbcon=map:10${C_OFF} (see README §3).
+   ${C_BOLD}2.${C_OFF} Put music in ${C_BOLD}$MUSIC_DIR${C_OFF}, or use Wi-Fi transfer once running.
+   ${C_BOLD}3.${C_OFF} Reboot:  ${C_BOLD}sudo reboot${C_OFF}
 
-  musi OS software is installed.
+   ${C_DIM}The Pi boots straight into musi OS.
+   Logs:   journalctl --user -u musi-ui -f
+   Status: systemctl --user status musi-ui${C_OFF}
 
-  1. Make sure the display/touch/DAC are enabled in /boot/firmware/config.txt
-     and add the cmdline.txt splash params noted above (README §3).
-  2. Put music in $MUSIC_DIR  (or use Wi-Fi transfer once running).
-  3. Reboot:   sudo reboot
-
-  The Pi will boot straight into musi OS.
-  Logs:  journalctl --user -u musi-ui -f
 EOF
