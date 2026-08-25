@@ -210,11 +210,20 @@ async function upload(files){
       const fd=new FormData();fd.append('file',f);
       const r=await api('/upload',{method:'POST',body:fd});
       if(r.status===423){locked=true;break}
+      if(!r.ok)throw new Error('HTTP '+r.status+' on '+f.name);
       const d=await r.json();
       if(d.status==='ok')ok++;else skip++;
       bar.style.width=((i+1)/files.length*100)+'%';
     }
-  }catch(e){st.textContent='';return}
+  }catch(e){
+    // Never fail silently: a blank status bar looks identical to "nothing
+    // happened" and hides real server errors (a 500 returns an HTML error
+    // page, so r.json() throws and lands here).
+    st.innerHTML='<span style="color:#ff5c8a">&#10007;</span> Upload failed &mdash; '+
+                 (e && e.message ? e.message : 'connection lost');
+    bw.style.display='none';
+    return;
+  }
   if(locked){
     st.innerHTML='<span style="color:#ff5c8a">✗</span> Storage is locked — unlock in Settings → Power on the device';
     return;

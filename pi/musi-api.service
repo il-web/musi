@@ -3,6 +3,15 @@ Description=musi device API (library management HTTP server)
 After=network.target
 
 [Service]
+# Spool uploads to DISK, not /tmp. install.sh mounts /tmp as a 64MB RAM tmpfs
+# (good for SD-card wear), but werkzeug streams every multipart upload through
+# a tempfile. Uploading several tracks at once overruns 64MB and the request
+# dies with "OSError: [Errno 28] No space left on device" -> HTTP 500, while
+# df shows tens of GB free on /. It also contradicted MAX_CONTENT_LENGTH=256MB.
+Environment=TMPDIR=%h/.cache/musi-uploads
+ExecStartPre=/bin/mkdir -p %h/.cache/musi-uploads
+# Clear any spool left behind by a killed request.
+ExecStartPre=/bin/sh -c 'rm -f %h/.cache/musi-uploads/tmp* 2>/dev/null || true'
 ExecStart=%h/musi/.venv/bin/python -m musi.api
 Restart=always
 RestartSec=5

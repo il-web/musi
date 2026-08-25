@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=3
+LATEST_STEP=4
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -73,6 +73,19 @@ user_2() {
 # The Cloudflare Tunnel was dropped before it ever went live. The step is gone
 # but LATEST_STEP stays at 3: devices that already recorded level 3 must not be
 # handed a *different* step 3 later. Number the next pack 4.
+
+# ── step 4: upload spool off the 64MB /tmp tmpfs (2026-08-25) ────────────────
+# Uploads were dying with HTTP 500 once /tmp filled: werkzeug streams every
+# multipart upload through a tempfile, and install.sh mounts /tmp as a 64MB RAM
+# tmpfs. The failure is "OSError: [Errno 28] No space left on device" while df
+# reports tens of GB free on /. musi-api.service now sets TMPDIR to a disk path.
+user_4() {
+    install -m 0644 "$REPO/pi/musi-api.service" "$HOME/.config/systemd/user/musi-api.service"
+    mkdir -p "$HOME/.cache/musi-uploads"
+    rm -f "$HOME"/.cache/musi-uploads/tmp* 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user restart musi-api 2>/dev/null || true
+}
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════
 
