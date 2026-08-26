@@ -73,7 +73,8 @@ def _launcher(app):
 
 def test_four_apps_in_order(app):
     s = _launcher(app)
-    assert [k for k, _ in s.APPS] == ["music", "settings", "clock", "sleep"]
+    assert [k for k, _ in s.APPS] == [
+        "music", "settings", "clock", "sleep", "customization"]
 
 
 def test_tap_on_the_tile_opens_the_app(app):
@@ -104,17 +105,17 @@ def test_swipe_left_advances_to_settings(app):
     assert app.stack[-1].__class__.__name__ == "SettingsScreen"
 
 
-def test_swipe_right_wraps_to_sleep(app):
+def test_swipe_right_wraps_to_customization(app):
     s = _launcher(app)
     s.on_press(60, 160)
     s.on_drag(240, 160)
     s.on_release(240, 160)
     while s._car.update():
         pass
-    assert s._car.index == 3
+    assert s._car.index == 4
     s.on_press(160, 160)
     s.on_release(160, 160)
-    assert app.stack[-1].__class__.__name__ == "SleepScreen"
+    assert app.stack[-1].__class__.__name__ == "CustomizationScreen"
 
 
 def test_clock_page_opens_clock(app):

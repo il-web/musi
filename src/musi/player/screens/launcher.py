@@ -43,6 +43,7 @@ class LauncherScreen(Screen):
         ("settings", "Settings"),
         ("clock",    "Clock"),
         ("sleep",    "Sleep"),
+        ("customization", "Customization"),
     ]
 
     SCRIM_Y     = SCRIM_Y
@@ -197,6 +198,9 @@ class LauncherScreen(Screen):
         elif key == "sleep":
             from musi.player.screens.sleep import SleepScreen
             self.app.push(SleepScreen(self.app))
+        elif key == "customization":
+            from musi.player.screens.customization import CustomizationScreen
+            self.app.push(CustomizationScreen(self.app))
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.PLAY_PAUSE:

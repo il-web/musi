@@ -13,7 +13,7 @@ import pytest
 
 
 def test_four_keys():
-    assert app_tiles.KEYS == ("music", "settings", "clock", "sleep")
+    assert app_tiles.KEYS == ("music", "settings", "clock", "sleep", "customization")
 
 
 def test_tile_is_square_and_118_by_default():
@@ -41,7 +41,7 @@ def test_centre_is_opaque():
 
 def test_each_app_has_a_distinct_accent():
     accents = {app_tiles.accent(k) for k in app_tiles.KEYS}
-    assert len(accents) == 4
+    assert len(accents) == 5
 
 
 def test_unknown_key_raises():

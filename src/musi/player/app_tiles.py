@@ -12,14 +12,15 @@ import pygame
 
 TILE: int = 118
 
-KEYS: tuple[str, ...] = ("music", "settings", "clock", "sleep")
+KEYS: tuple[str, ...] = ("music", "settings", "clock", "sleep", "customization")
 
 # (top-left colour, bottom-right colour) — the first is also the page accent
 _GRADIENTS: dict[str, tuple[tuple, tuple]] = {
-    "music":    ((255,  92, 138), (122,  59, 255)),
-    "settings": ((110, 140, 255), ( 43,  43, 110)),
-    "clock":    (( 46, 196, 182), ( 11, 110, 110)),
-    "sleep":    ((155,  92, 255), ( 59,  31, 110)),
+    "music":         ((255,  92, 138), (122,  59, 255)),
+    "settings":      ((110, 140, 255), ( 43,  43, 110)),
+    "clock":         (( 46, 196, 182), ( 11, 110, 110)),
+    "sleep":         ((155,  92, 255), ( 59,  31, 110)),
+    "customization": ((255, 170,  60), (200,  60,  20)),
 }
 
 _cache: dict[tuple[str, int], pygame.Surface] = {}
@@ -113,9 +114,28 @@ def _glyph_sleep(s: pygame.Surface, n: int) -> None:
     s.blit(moon, (0, 0))
 
 
+def _glyph_customization(s: pygame.Surface, n: int) -> None:
+    """Picture frame with a sun and a mountain."""
+    w = (255, 255, 255)
+    cx, cy = n // 2, n // 2
+    u = n / 118.0
+    frame = pygame.Rect(0, 0, int(60 * u), int(48 * u))
+    frame.center = (cx, cy)
+    pygame.draw.rect(s, w, frame, max(2, int(4 * u)),
+                     border_radius=int(6 * u))
+    pygame.draw.circle(s, w, (frame.x + int(16 * u), frame.y + int(14 * u)),
+                       int(5 * u))
+    pygame.draw.polygon(s, w, [
+        (frame.x + int(6 * u),  frame.bottom - int(6 * u)),
+        (frame.x + int(26 * u), frame.y + int(22 * u)),
+        (frame.x + int(46 * u), frame.bottom - int(6 * u)),
+    ])
+
+
 _GLYPHS = {
-    "music":    _glyph_music,
-    "settings": _glyph_settings,
-    "clock":    _glyph_clock,
-    "sleep":    _glyph_sleep,
+    "music":         _glyph_music,
+    "settings":      _glyph_settings,
+    "clock":         _glyph_clock,
+    "sleep":         _glyph_sleep,
+    "customization": _glyph_customization,
 }
