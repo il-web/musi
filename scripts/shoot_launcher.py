@@ -82,16 +82,22 @@ def main() -> None:
     launcher.on_release(150, 160)
 
     # Wallpapers — set the pref, redraw the home screen, restore it afterwards.
+    # Use a fresh LauncherScreen instance so the carousel starts at rest.
     from musi.player import prefs
     was = prefs.get("wallpaper")
+    shot = LauncherScreen(app)
+    app.stack.append(shot)
+    shot.on_enter()
     for name in ("warm", "cool"):
         prefs.set("wallpaper", name)
-        launcher.draw(surface, Status())
+        shot.draw(surface, Status())
+        assert not shot._car.animating, "carousel still animating — frame would be mid-slide"
         pygame.image.save(surface, str(out / f"launcher-{name}.png"))
     prefs.set("wallpaper", "warm")
     CustomizationScreen(app).draw(surface, Status())
     pygame.image.save(surface, str(out / "customization.png"))
     prefs.set("wallpaper", was)
+    app.stack.pop()
 
     music = MusicScreen(app)
     app.stack.append(music)
