@@ -2,10 +2,11 @@
 
     python scripts/shoot_launcher.py out/
 
-Writes launcher-0..3.png, launcher-drag.png, music-0..3.png, clock.png,
-sleep.png. Requires dev_library.db in the repo root — rebuild it by scanning a
-real music folder if it is missing. Never point a live app at dev_library.db
-with a different MUSI_MUSIC_ROOT: the debounced rescan prunes the whole table.
+Writes launcher-0..3.png, launcher-drag.png, launcher-warm.png, launcher-cool.png,
+music-0..3.png, customization.png, clock.png, sleep.png. Requires dev_library.db
+in the repo root — rebuild it by scanning a real music folder if it is missing.
+Never point a live app at dev_library.db with a different MUSI_MUSIC_ROOT: the
+debounced rescan prunes the whole table.
 """
 import os
 import sys
@@ -64,6 +65,7 @@ def main() -> None:
     from musi.player.screens.music import MusicScreen
     from musi.player.screens.clock import ClockScreen
     from musi.player.screens.sleep import SleepScreen
+    from musi.player.screens.customization import CustomizationScreen
 
     launcher = LauncherScreen(app)
     app.stack.append(launcher)
@@ -78,6 +80,18 @@ def main() -> None:
     launcher.draw(surface, Status())
     pygame.image.save(surface, str(out / "launcher-drag.png"))
     launcher.on_release(150, 160)
+
+    # Wallpapers — set the pref, redraw the home screen, restore it afterwards.
+    from musi.player import prefs
+    was = prefs.get("wallpaper")
+    for name in ("warm", "cool"):
+        prefs.set("wallpaper", name)
+        launcher.draw(surface, Status())
+        pygame.image.save(surface, str(out / f"launcher-{name}.png"))
+    prefs.set("wallpaper", "warm")
+    CustomizationScreen(app).draw(surface, Status())
+    pygame.image.save(surface, str(out / "customization.png"))
+    prefs.set("wallpaper", was)
 
     music = MusicScreen(app)
     app.stack.append(music)
