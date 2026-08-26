@@ -132,8 +132,11 @@ class LauncherScreen(Screen):
             return self._pages[idx]
 
         # Transparent: the wallpaper is drawn underneath and must show through.
-        # With no wallpaper set this composites over the theme.BG fill instead,
-        # which looks identical to the old opaque page.
+        # With no wallpaper set this composites over the theme.BG fill instead.
+        # The one visible difference from the old opaque page: statusbar.py's
+        # y=26 separator line is no longer erased, since nothing here paints
+        # over it. With a wallpaper set, the wallpaper blit covers row 26, so
+        # that separator shows on "none" and is hidden on "warm"/"cool".
         page = pygame.Surface((320, PAGE_H), pygame.SRCALPHA)
 
         tile = app_tiles.render_tile(key)

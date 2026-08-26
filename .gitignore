@@ -25,6 +25,7 @@ dev_art/
 .superpowers/
 .ui-capture/
 .vscode/
+out/
 
 # MPD runtime files
 mpd/state

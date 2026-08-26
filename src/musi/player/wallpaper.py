@@ -55,10 +55,10 @@ def _load(name: str) -> pygame.Surface | None:
         return None
     try:
         img = pygame.image.load(str(_DIR / f"{name}.jpg"))
+        return _fit(img).convert()
     except (pygame.error, OSError):
         logging.warning("wallpaper %r failed to load", name, exc_info=True)
         return None
-    return _fit(img).convert()
 
 
 def _fit(img: pygame.Surface) -> pygame.Surface:
@@ -68,7 +68,8 @@ def _fit(img: pygame.Surface) -> pygame.Surface:
         return img
 
     scaled_h = max(HEIGHT, round(ih * WIDTH / iw))
-    img = pygame.transform.smoothscale(img, (WIDTH, scaled_h))
+    if (iw, scaled_h) != (WIDTH, ih):
+        img = pygame.transform.smoothscale(img, (WIDTH, scaled_h))
     if scaled_h == HEIGHT:
         return img
 

@@ -47,6 +47,14 @@ def _load() -> dict[str, object]:
 
 
 def get(key: str, default: object = None) -> object:
+    """The stored value for ``key``, or a fallback if there is none.
+
+    Precedence: the value on disk, then ``DEFAULTS[key]``, then the caller's
+    ``default``. For any key listed in DEFAULTS, the caller's ``default`` is
+    therefore never returned — ``get("wallpaper", "warm")`` still returns
+    "none" if that is the stored/default value. ``default`` only matters for
+    keys DEFAULTS does not know about.
+    """
     return _load().get(key, DEFAULTS.get(key, default))
 
 
@@ -59,7 +67,14 @@ def set(key: str, value: object) -> None:
     tmp = path.with_name(path.name + ".tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(values, indent=2), encoding="utf-8")
+        # fsync before the rename: os.replace is atomic, but without this the
+        # data may still be sitting in a page cache buffer, not on the SD
+        # card, when a power cut hits — same failure the temp-file dance
+        # exists to prevent, just one step earlier.
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps(values, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except OSError:
         logging.warning("could not persist prefs", exc_info=True)

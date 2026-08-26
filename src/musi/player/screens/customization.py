@@ -31,18 +31,44 @@ def tile_rect(i: int) -> pygame.Rect:
     return pygame.Rect(GAP + i * (TILE_W + GAP), TILE_Y, TILE_W, TILE_H)
 
 
+_HIT_PAD_Y: int | None = None
+
+
+def _hit_pad_y() -> int:
+    """Vertical inflate for a tile's touch zone, wide enough that the caption
+    below the thumbnail is tappable too — not just the thumbnail itself.
+
+    Derived from the real geometry rather than a guessed constant: pygame.Rect
+    .inflate() grows a rect symmetrically around its centre, so to reach down
+    to the bottom of the rendered caption the total vertical growth must be
+    twice the distance from the tile's centre to that bottom edge, plus a
+    small margin so the zone comfortably covers the text rather than just
+    grazing it.
+    """
+    global _HIT_PAD_Y
+    if _HIT_PAD_Y is None:
+        label_h = max(theme.render(label, 12, theme.DIM).get_height()
+                      for _, label in OPTIONS)
+        centre_y = TILE_Y + TILE_H / 2
+        label_bottom = LABEL_Y + label_h
+        _HIT_PAD_Y = int(2 * (label_bottom - centre_y) - TILE_H) + 4
+    return _HIT_PAD_Y
+
+
 class CustomizationScreen(Screen):
 
     def __init__(self, app) -> None:
         super().__init__(app)
         self._tap = PendingTap()
         self._header: pygame.Surface | None = None
+        self._hint: pygame.Surface | None = None
         self._labels: list[pygame.Surface] = []
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
         if self._header is None:
             self._header = theme.render("Customization", 16, theme.WHITE,
                                         bold=True)
+            self._hint = theme.render("Home screen wallpaper", 12, theme.DIM)
             self._labels = [theme.render(label, 12, theme.DIM)
                             for _, label in OPTIONS]
 
@@ -53,9 +79,7 @@ class CustomizationScreen(Screen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_back=len(self.app.stack) > 1)
         surface.blit(self._header, (14, 34))
-
-        hint = theme.render("Home screen wallpaper", 12, theme.DIM)
-        surface.blit(hint, (14, 78))
+        surface.blit(self._hint, (14, 78))
 
         for i, (name, _) in enumerate(OPTIONS):
             rect = tile_rect(i)
@@ -86,7 +110,7 @@ class CustomizationScreen(Screen):
 
         if not self._tap.pending:
             for i, (name, _) in enumerate(OPTIONS):
-                if tile_rect(i).inflate(GAP, 20).collidepoint(x, y):
+                if tile_rect(i).inflate(GAP, _hit_pad_y()).collidepoint(x, y):
                     self._tap.set(lambda n=name: prefs.set("wallpaper", n))
                     return None
         return super().handle_touch(x, y)

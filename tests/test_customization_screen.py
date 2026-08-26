@@ -12,7 +12,9 @@ pygame.display.set_mode((320, 480))
 import pytest
 
 from musi.player import prefs, wallpaper
-from musi.player.screens.customization import CustomizationScreen, OPTIONS, tile_rect
+from musi.player.screens.customization import (
+    CustomizationScreen, LABEL_Y, OPTIONS, tile_rect,
+)
 
 
 class FakeApp:
@@ -84,6 +86,23 @@ def test_tapping_an_option_persists_it(index, expected):
     screen = CustomizationScreen(FakeApp())
     _tap(screen, index)
     assert prefs.get("wallpaper") == expected
+
+
+def test_tapping_the_caption_below_a_tile_selects_it():
+    """The text label under a thumbnail must be tappable too, not just the
+    thumbnail itself — a caption is a natural thing to press on a touchscreen."""
+    prefs.set("wallpaper", "none")
+    screen = CustomizationScreen(FakeApp())
+    screen.draw(pygame.Surface((320, 480)), FakeStatus())  # renders the labels
+
+    rect = tile_rect(1)  # "warm"
+    caption_point = (rect.centerx, LABEL_Y + 2)  # inside the label text, below the tile
+    assert caption_point[1] >= rect.bottom, "point must actually be past the tile"
+
+    screen.handle_touch(*caption_point)
+    time.sleep(0.15)
+    screen._tap.update()
+    assert prefs.get("wallpaper") == "warm"
 
 
 def test_choice_survives_a_reload():

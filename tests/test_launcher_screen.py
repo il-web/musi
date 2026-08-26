@@ -164,7 +164,7 @@ def test_animates_only_while_snapping(app):
 def test_draw_runs_on_every_page(app):
     surface = pygame.Surface((320, 480))
     s = _launcher(app)
-    for i in range(4):
+    for i in range(len(s.APPS)):
         s._car.index = i
         s.draw(surface, FakeStatus())
 

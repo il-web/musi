@@ -2,7 +2,7 @@
 
     python scripts/shoot_launcher.py out/
 
-Writes launcher-0..3.png, launcher-drag.png, launcher-warm.png, launcher-cool.png,
+Writes launcher-0..4.png, launcher-drag.png, launcher-warm.png, launcher-cool.png,
 customization.png, music-0..3.png, clock.png, sleep.png. Requires dev_library.db
 in the repo root — rebuild it by scanning a real music folder if it is missing.
 Never point a live app at dev_library.db with a different MUSI_MUSIC_ROOT: the
@@ -69,7 +69,7 @@ def main() -> None:
 
     launcher = LauncherScreen(app)
     app.stack.append(launcher)
-    for i in range(4):
+    for i in range(len(launcher.APPS)):
         launcher._car.index = i
         launcher.draw(surface, Status())
         pygame.image.save(surface, str(out / f"launcher-{i}.png"))
