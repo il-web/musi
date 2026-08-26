@@ -36,3 +36,7 @@ def api_token_path() -> Path:
 
 def api_origins_path() -> Path:
     return Path(os.environ.get("MUSI_API_ORIGINS_PATH", _BASE / "api-origins"))
+
+
+def prefs_path() -> Path:
+    return Path(os.environ.get("MUSI_PREFS_PATH", _BASE / "prefs.json"))
