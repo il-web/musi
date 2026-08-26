@@ -3,7 +3,7 @@
     python scripts/shoot_launcher.py out/
 
 Writes launcher-0..3.png, launcher-drag.png, launcher-warm.png, launcher-cool.png,
-music-0..3.png, customization.png, clock.png, sleep.png. Requires dev_library.db
+customization.png, music-0..3.png, clock.png, sleep.png. Requires dev_library.db
 in the repo root — rebuild it by scanning a real music folder if it is missing.
 Never point a live app at dev_library.db with a different MUSI_MUSIC_ROOT: the
 debounced rescan prunes the whole table.
@@ -85,19 +85,21 @@ def main() -> None:
     # Use a fresh LauncherScreen instance so the carousel starts at rest.
     from musi.player import prefs
     was = prefs.get("wallpaper")
-    shot = LauncherScreen(app)
-    app.stack.append(shot)
-    shot.on_enter()
-    for name in ("warm", "cool"):
-        prefs.set("wallpaper", name)
-        shot.draw(surface, Status())
-        assert not shot._car.animating, "carousel still animating — frame would be mid-slide"
-        pygame.image.save(surface, str(out / f"launcher-{name}.png"))
-    prefs.set("wallpaper", "warm")
-    CustomizationScreen(app).draw(surface, Status())
-    pygame.image.save(surface, str(out / "customization.png"))
-    prefs.set("wallpaper", was)
-    app.stack.pop()
+    try:
+        shot = LauncherScreen(app)
+        app.stack.append(shot)
+        shot.on_enter()
+        for name in ("warm", "cool"):
+            prefs.set("wallpaper", name)
+            shot.draw(surface, Status())
+            assert not shot._car.animating, "carousel still animating — frame would be mid-slide"
+            pygame.image.save(surface, str(out / f"launcher-{name}.png"))
+        prefs.set("wallpaper", "warm")
+        CustomizationScreen(app).draw(surface, Status())
+        pygame.image.save(surface, str(out / "customization.png"))
+    finally:
+        prefs.set("wallpaper", was)
+        app.stack.pop()
 
     music = MusicScreen(app)
     app.stack.append(music)
