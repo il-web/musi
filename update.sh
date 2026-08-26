@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=4
+LATEST_STEP=5
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -85,6 +85,52 @@ user_4() {
     rm -f "$HOME"/.cache/musi-uploads/tmp* 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user restart musi-api 2>/dev/null || true
+}
+
+# ── step 5: power pack — LEDs + HDMI off (2026-08-26) ────────────────────────
+# The Pi 3 this moved to draws far more than the Zero W it was written for, and
+# the thing runs off a powerbank. Two boot-time savings with no runtime cost:
+#   - ACT (green) + PWR (red) LEDs: pointless inside a sealed case, and they
+#     leak light into it. The firmware ignores params a board doesn't support.
+#   - HDMI: never plugged in here. "tvservice -o" does NOT work under KMS/DRM
+#     (that is the legacy firmware path) — disabling the connector on the
+#     kernel command line is the equivalent that does.
+# Both need a reboot. Note the trade: with no LED and no console, a panel that
+# fails to come up leaves no local sign of life. SSH is then the way back in,
+# which is why the Ethernet/USB hub was deliberately left powered.
+# The CPU governor is left alone on purpose — see docs/power-measurement.md.
+user_5() {
+    say "power pack applied — LEDs and HDMI go quiet at the next reboot"
+}
+
+root_5() {
+    # Optional arg = boot dir, for tests. Real runs take the default.
+    boot="${1:-}"
+    if [ -z "$boot" ]; then
+        boot=/boot/firmware
+        [ -d "$boot" ] || boot=/boot
+    fi
+
+    cfg="$boot/config.txt"
+    if [ -f "$cfg" ]; then
+        # Match the WHOLE line: testing "^dtparam=" would hit the existing i2s
+        # and panel params and quietly skip every one of these.
+        for line in \
+            'dtparam=act_led_trigger=none' \
+            'dtparam=act_led_activelow=off' \
+            'dtparam=pwr_led_trigger=none' \
+            'dtparam=pwr_led_activelow=off'
+        do
+            grep -qxF "$line" "$cfg" || printf '%s\n' "$line" >> "$cfg"
+        done
+    fi
+
+    # cmdline.txt is a SINGLE line — the firmware reads only the first one, so
+    # this appends to it and never adds a new one.
+    cmdline="$boot/cmdline.txt"
+    if [ -f "$cmdline" ] && ! grep -q 'video=HDMI-A-1:d' "$cmdline"; then
+        sed -i -e '1s/[[:space:]]*$//' -e '1s/$/ video=HDMI-A-1:d/' "$cmdline"
+    fi
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════

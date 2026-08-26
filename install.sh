@@ -325,6 +325,32 @@ for kv in boot_delay=0 disable_splash=1; do
     grep -q "^${kv%%=*}=" "$BOOT_CFG" || echo "$kv" | sudo tee -a "$BOOT_CFG" > /dev/null
 done
 
+# Power: mirrors update.sh root_5 — keep the two in step (tests enforce it).
+# The ACT (green) and PWR (red) LEDs are pointless inside a sealed case and leak
+# light into it; HDMI is never plugged in. Both are pure boot-time settings.
+# Match the WHOLE line here: "^dtparam=" would hit the i2s and panel params
+# already in the file and skip every one of these.
+for line in \
+    'dtparam=act_led_trigger=none' \
+    'dtparam=act_led_activelow=off' \
+    'dtparam=pwr_led_trigger=none' \
+    'dtparam=pwr_led_activelow=off'
+do
+    grep -qxF "$line" "$BOOT_CFG" || echo "$line" | sudo tee -a "$BOOT_CFG" > /dev/null
+done
+
+# HDMI off. "tvservice -o" does NOT work under KMS/DRM — that is the legacy
+# firmware path. Disabling the connector on the kernel command line is the
+# equivalent that does. cmdline.txt is ONE line: append to it, never add one.
+BOOT_CMDLINE=/boot/firmware/cmdline.txt
+[ -f "$BOOT_CMDLINE" ] || BOOT_CMDLINE=/boot/cmdline.txt
+if [ -f "$BOOT_CMDLINE" ] && ! grep -q 'video=HDMI-A-1:d' "$BOOT_CMDLINE"; then
+    sudo sed -i -e '1s/[[:space:]]*$//' -e '1s/$/ video=HDMI-A-1:d/' "$BOOT_CMDLINE"
+fi
+# NOTE: with no LEDs and no console, a panel that fails to come up leaves no
+# local sign of life — SSH is the way back in. That is part of why the Pi 3's
+# Ethernet/USB hub is deliberately left powered.
+
 # Wi-Fi power save on by default (the app turns it off while WiFi Transfer is
 # open — power save adds latency that slows uploads).
 sudo mkdir -p /etc/NetworkManager/conf.d

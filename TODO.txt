@@ -182,6 +182,27 @@ went live. The API is LAN-only until something replaces it.
     - CORS origins also read from ~/.local/share/musi/api-origins (one per
       line, read at service start) — site domain changes need no code edit
 
+[x] Power & runtime pack (OTA step 5, 2026-08-26)
+    - The Pi 3 swap left the power tuning behind: everything in 9d was
+      written for a Zero W. Two boot-time savings, no runtime cost.
+    - config.txt: ACT (green) + PWR (red) LEDs off — useless in a sealed
+      case and they leak light into it
+    - cmdline.txt: video=HDMI-A-1:d — HDMI is never plugged in here.
+      NOTE: tvservice -o does NOT work under KMS/DRM; this is the
+      equivalent that does. Needs a reboot, like the LEDs.
+    - Idempotency matches the WHOLE line: "^dtparam=" would hit the
+      existing i2s/panel params and silently skip every new one
+    - tests/test_power_pack_config.py runs the real root_5 against a fake
+      /boot and asserts install.sh still mirrors it (drift guard)
+    - docs/power-measurement.md: test conditions + tables to fill in
+    RULED OUT (do not re-propose):
+    - USB/Ethernet hub power-down — biggest single saving on a Pi 3, but
+      LAN9514 is one chip: no Ethernet without losing USB too. Ilay kept it.
+    - BT radio off while on the DAC — breaks speaker auto-reconnect
+    - Underclock/undervolt — stability risk, revisit only if numbers
+      disappoint
+    OPEN: before/after meter readings — pack is NOT verified until then
+
 [ ] Power button (FINAL plan 2026-07-03: DIY soft-latch, ~5 ILS, no PCB —
     6 components on a 2x3cm perfboard scrap; replaces Pololu & slide-switch)
     - Circuit: P-MOSFET Q1 in series TP4056 OUT+ -> MT3608 VIN
