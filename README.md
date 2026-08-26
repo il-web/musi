@@ -30,8 +30,8 @@ automatic switching, on-device pairing, a boot splash, and over-the-air updates.
 musi OS runs on top of a working Raspberry Pi OS install. It uses whatever the OS
 already exposes — it does **not** drive your panel or sound card itself.
 
-- **Board:** any Raspberry Pi with the 40-pin header. **Pi Zero 2 W recommended**
-  (Pi Zero W works but is tight — single-core).
+- **Board:** any Raspberry Pi with the 40-pin header. A **Pi 3 or Pi Zero 2 W** gives
+  the UI comfortable headroom (a single-core Pi Zero W works, but it is tight).
 - **RAM:** 512 MB or more.
 - **Display:** anything Linux can render to at **320×480 portrait** — an SPI TFT,
   DSI, or HDMI screen. The UI is fixed at this resolution.
@@ -50,10 +50,15 @@ already exposes — it does **not** drive your panel or sound card itself.
 
 One known-good setup, for reference:
 
-- **Raspberry Pi Zero W** (BCM2835, single-core ARMv6, 512 MB)
+- **Raspberry Pi 3 Model B** (BCM2837, quad-core ARMv8, 1 GB) — the current build.
+  A **Pi Zero W** (single-core ARMv6, 512 MB) also ran this setup, just with no headroom.
 - 3.5" **320×480 ST7796** SPI display, **FT5x06** capacitive touch
-- **PCM5102A** I²S DAC, plus Bluetooth A2DP speaker/headphones
-- **Raspberry Pi OS (Trixie / Debian 13), 32-bit**
+- **PCM5102A** I²S DAC (`dtparam=i2s=on` + `dtoverlay=hifiberry-dac`), plus Bluetooth
+  A2DP speaker/headphones
+- **Raspberry Pi OS (Trixie / Debian 13)** — tested 32-bit on the Zero W
+
+> On a board with HDMI audio present, the ALSA card index is not stable across boots.
+> musi looks the DAC up by card **name**, not index — see `pi/musi-bt-router`.
 
 ---
 
