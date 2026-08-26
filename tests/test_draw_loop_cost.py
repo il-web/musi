@@ -137,3 +137,31 @@ def test_minibar_reload_is_skipped_for_an_unchanged_track(app):
     for _ in range(20):
         minibar.draw(surface, app, FakeStatus())
     assert app.db.queries == 0
+
+
+def test_launcher_with_a_wallpaper_does_no_file_io_per_frame(app, tmp_path, monkeypatch):
+    """Loading art per frame is what starved MPD of a core on the Zero W."""
+    from musi.player import prefs, wallpaper
+    from musi.player.screens.launcher import LauncherScreen
+
+    monkeypatch.setenv("MUSI_PREFS_PATH", str(tmp_path / "prefs.json"))
+    prefs.reload()
+    wallpaper.clear_cache()
+    prefs.set("wallpaper", "warm")
+
+    surface = pygame.Surface((320, 480))
+    s = LauncherScreen(app)
+    app.stack.append(s)
+    s.on_enter()
+    s.draw(surface, FakeStatus())          # first frame may load
+
+    loads = []
+    real_load = pygame.image.load
+    monkeypatch.setattr(pygame.image, "load",
+                        lambda p: (loads.append(p), real_load(p))[1])
+    for _ in range(20):
+        s.draw(surface, FakeStatus())
+
+    assert loads == []
+    prefs.reload()
+    wallpaper.clear_cache()

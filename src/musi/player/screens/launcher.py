@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import app_tiles, audio_detect, minibar, statusbar, theme
+from musi.player import app_tiles, audio_detect, minibar, prefs, statusbar, theme, wallpaper
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -26,6 +26,13 @@ LABEL_Y  = 210     # app name top, relative to PAGE_Y
 SUB_Y    = 238     # subtitle top, relative to PAGE_Y
 DOTS_Y   = 366     # page dots centre, relative to PAGE_Y
 
+# Scrim — the stock artwork is brightest mid-screen, exactly where the app name
+# and subtitle sit. A stationary band keeps them legible without hiding the art.
+# Relative to PAGE_Y, like the other layout constants here.
+SCRIM_Y     = 190
+SCRIM_H     = 84
+SCRIM_ALPHA = 150
+
 _SLOP = 12         # matches app.TAP_SLOP_PX — movement below this is a tap
 
 
@@ -38,6 +45,10 @@ class LauncherScreen(Screen):
         ("sleep",    "Sleep"),
     ]
 
+    SCRIM_Y     = SCRIM_Y
+    SCRIM_H     = SCRIM_H
+    SCRIM_ALPHA = SCRIM_ALPHA
+
     def __init__(self, app) -> None:
         super().__init__(app)
         self._car = Carousel(len(self.APPS))
@@ -47,6 +58,7 @@ class LauncherScreen(Screen):
         self._last_x  = 0
         self._moved   = 0.0
         self._albums: int | None = None   # counted once, not once per frame
+        self._scrim_surf: pygame.Surface | None = None
 
     @property
     def animates(self) -> bool:
@@ -83,6 +95,14 @@ class LauncherScreen(Screen):
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type())
 
+        # Wallpaper goes on the main surface, not into the pages: a page is
+        # blitted at a sliding x-offset, so artwork inside one would slide with
+        # it. Both cached lookups — no disk access here.
+        paper = wallpaper.surface(str(prefs.get("wallpaper")))
+        if paper is not None:
+            surface.blit(paper, (0, PAGE_Y))
+            surface.blit(self._scrim(), (0, PAGE_Y + SCRIM_Y))
+
         clip = surface.get_clip()
         surface.set_clip(pygame.Rect(0, PAGE_Y, 320, PAGE_H))
         for idx, dx in self._car.visible_pages():
@@ -91,6 +111,18 @@ class LauncherScreen(Screen):
 
         minibar.draw(surface, self.app, status)
 
+    def _scrim(self) -> pygame.Surface:
+        """Soft dark band behind the label, built once. Fades in and out so it
+        reads as shading rather than a rectangle laid over the artwork."""
+        if self._scrim_surf is None:
+            s = pygame.Surface((320, SCRIM_H), pygame.SRCALPHA)
+            half = SCRIM_H / 2
+            for y in range(SCRIM_H):
+                a = int(SCRIM_ALPHA * (1.0 - abs(y - half) / half))
+                pygame.draw.line(s, (0, 0, 0, a), (0, y), (319, y))
+            self._scrim_surf = s
+        return self._scrim_surf
+
     def _page(self, idx: int) -> pygame.Surface:
         """Cached page surface; rebuilt when its live subtitle changes."""
         key, label = self.APPS[idx]
@@ -98,8 +130,10 @@ class LauncherScreen(Screen):
         if idx in self._pages and self._page_subs.get(idx) == sub:
             return self._pages[idx]
 
-        page = pygame.Surface((320, PAGE_H))
-        page.fill(theme.BG)
+        # Transparent: the wallpaper is drawn underneath and must show through.
+        # With no wallpaper set this composites over the theme.BG fill instead,
+        # which looks identical to the old opaque page.
+        page = pygame.Surface((320, PAGE_H), pygame.SRCALPHA)
 
         tile = app_tiles.render_tile(key)
         page.blit(tile, tile.get_rect(centerx=160, y=TILE_Y))
