@@ -70,9 +70,20 @@ def app(tmp_path):
     run_migrations(conn)
     artist = conn.execute("INSERT INTO artists (name) VALUES ('Artist')").lastrowid
     for n in range(3):
-        conn.execute(
+        album = conn.execute(
             "INSERT INTO albums (artist_id, title, year) VALUES (?, ?, 2025)",
-            (artist, f"Album {n}"))
+            (artist, f"Album {n}")).lastrowid
+        # Every Home shelf inner-joins tracks (and play_history for two of the
+        # three), so without these rows HomeScreen.is_empty is True and draw()
+        # returns before touching a shelf — the zero-SQL assertion would then
+        # be checking the empty state, not the shelf draw path it exists for.
+        track = conn.execute(
+            """INSERT INTO tracks (album_id, artist_id, path, title, file_mtime)
+               VALUES (?, ?, ?, 'Track', ?)""",
+            (album, artist, f"/m/t{n}.mp3", 100 + n)).lastrowid
+        conn.execute(
+            "INSERT INTO play_history (track_id, played_at) VALUES (?, ?)",
+            (track, 10 + n))
     conn.commit()
     return FakeApp(CountingDB(conn))
 
