@@ -154,7 +154,7 @@ class HomeScreen(Screen):
         surface.blit(self._greet_surf, (MARGIN, GREET_Y))
 
     def _draw_shelf(self, surface, y, title, rows, shelf, region) -> None:
-        surface.blit(theme.render(title, 12, theme.WHITE, bold=True),
+        surface.blit(theme.render_cached(title, 12, theme.WHITE, bold=True),
                      (MARGIN, y))
         ay = y + LABEL_H
 
@@ -177,10 +177,12 @@ class HomeScreen(Screen):
         else:
             pygame.draw.rect(surface, (40, 40, 55), (x, y, CELL, CELL),
                              border_radius=4)
-        surface.blit(theme.render(row["title"], 10, theme.WHITE, max_width=CELL),
-                     (x, y + CELL + 5))
-        surface.blit(theme.render(row["artist"], 9, theme.DIM, max_width=CELL),
-                     (x, y + CELL + 18))
+        surface.blit(
+            theme.render_cached(row["title"], 10, theme.WHITE, max_width=CELL),
+            (x, y + CELL + 5))
+        surface.blit(
+            theme.render_cached(row["artist"], 9, theme.DIM, max_width=CELL),
+            (x, y + CELL + 18))
 
     def _draw_empty(self, surface: pygame.Surface) -> None:
         a = theme.render("No music yet", 15, theme.WHITE, bold=True)

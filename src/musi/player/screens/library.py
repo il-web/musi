@@ -145,11 +145,13 @@ class LibraryScreen(ListScreen):
         else:
             pygame.draw.rect(surface, (40, 40, 55), (x, y, CELL, CELL),
                              border_radius=4)
-        surface.blit(theme.render(item.label, 10, theme.WHITE, max_width=CELL),
-                     (x, y + CELL + 4))
+        surface.blit(
+            theme.render_cached(item.label, 10, theme.WHITE, max_width=CELL),
+            (x, y + CELL + 4))
         if item.sub:
-            surface.blit(theme.render(item.sub, 9, theme.DIM, max_width=CELL),
-                         (x, y + CELL + 16))
+            surface.blit(
+                theme.render_cached(item.sub, 9, theme.DIM, max_width=CELL),
+                (x, y + CELL + 16))
 
     def _draw_artist_row(self, surface, y, di) -> None:
         item = self.items[di]
@@ -157,7 +159,8 @@ class LibraryScreen(ListScreen):
         rect = pygame.Rect(MARGIN, y, 320 - MARGIN * 2, ARTIST_H - 3)
         pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
                          rect, border_radius=7)
-        lbl = theme.render(item.label, 13, theme.WHITE, bold=sel, max_width=250)
+        lbl = theme.render_cached(item.label, 13, theme.WHITE, bold=sel,
+                                  max_width=250)
         surface.blit(lbl, (rect.x + 12,
                            y + (ARTIST_H - 3 - lbl.get_height()) // 2))
         icons.draw_chevron_right(surface, rect.right - 14,

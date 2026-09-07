@@ -53,3 +53,20 @@ def test_empty_text_is_safe():
 def test_a_single_huge_word_still_fits_the_limit():
     surf = theme.render("A" * 200, 16, theme.WHITE, max_width=100)
     assert surf.get_width() <= 100
+
+
+# ── render_cached — memoised surfaces for per-frame list/grid labels ──────────
+
+def test_render_cached_returns_one_surface_for_identical_args():
+    a = theme.render_cached("New in your library", 12, theme.WHITE, bold=True)
+    b = theme.render_cached("New in your library", 12, theme.WHITE, bold=True)
+    assert a is b
+
+
+def test_render_cached_varies_by_every_argument():
+    base = theme.render_cached("Album title", 10, theme.WHITE, max_width=93)
+    assert theme.render_cached("Other title", 10, theme.WHITE, max_width=93) is not base
+    assert theme.render_cached("Album title", 11, theme.WHITE, max_width=93) is not base
+    assert theme.render_cached("Album title", 10, theme.DIM, max_width=93) is not base
+    assert theme.render_cached("Album title", 10, theme.WHITE, bold=True, max_width=93) is not base
+    assert theme.render_cached("Album title", 10, theme.WHITE, max_width=80) is not base
