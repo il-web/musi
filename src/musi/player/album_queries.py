@@ -42,7 +42,13 @@ def most_played(db, limit: int = 12) -> list:
 
 
 def recently_added(db, limit: int = 12) -> list:
-    """Newest music on the device, by file mtime — works with no play history."""
+    """Newest music on the device, by file mtime — works with no play history.
+
+    The inner JOIN tracks deliberately drops albums with no tracks: they have
+    no file_mtime to sort by and nothing to play on a "New in your library"
+    shelf. all_albums() does not join tracks and *will* list such an album —
+    that difference is intended, not a bug.
+    """
     return db.execute(
         f"""SELECT {_COLS}, MAX(t.file_mtime) AS added
             FROM albums  al
