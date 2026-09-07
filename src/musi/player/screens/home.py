@@ -20,6 +20,7 @@ import pygame
 
 from musi.player import (album_queries, art_cache, audio_detect, backdrop,
                          statusbar, theme)
+from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import Shelf
@@ -206,9 +207,17 @@ class HomeScreen(Screen):
                 return rows, shelf, ay
         return None
 
-    def handle_touch(self, x: int, y: int) -> None:
+    def handle_touch(self, x: int, y: int) -> "Button | None":
         """Taps outside a shelf only. Taps on a shelf are resolved in
-        on_release, because on_press captures the gesture."""
+        on_release, because on_press captures the gesture.
+
+        A status-bar tap is BACK — the host paints the ‹ chevron whenever the
+        stack is deeper than one, and Library/Search already return it. Do NOT
+        defer to super(): its y > 430 branch returns SELECT/PLAY_PAUSE, which is
+        unreachable under the host and wrong if Home is ever drawn standalone.
+        """
+        if y < 26:
+            return Button.BACK
         return None
 
     def on_press(self, x: int, y: int) -> bool:

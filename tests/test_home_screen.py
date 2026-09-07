@@ -168,6 +168,22 @@ def test_draw_does_no_sql_after_the_first_frame(tmp_path):
     assert app.db.queries == 0
 
 
+def test_status_bar_tap_returns_back(tmp_path):
+    """Home paints the ‹ chevron under the host (stack deeper than one), so a
+    status-bar tap must resolve to BACK — Library and Search already do."""
+    from musi.player.input import Button
+    s = HomeScreen(FakeApp(_library(tmp_path, with_history=True)))
+    s.on_enter()
+    assert s.handle_touch(50, 10) is Button.BACK
+
+
+def test_content_area_tap_is_ignored(tmp_path):
+    """A tap in the shelf band is resolved by on_press/on_release, not here."""
+    s = HomeScreen(FakeApp(_library(tmp_path, with_history=True)))
+    s.on_enter()
+    assert s.handle_touch(50, 200) is None
+
+
 def _shelf_y(screen):
     """A y inside the first shelf's art band."""
     from musi.player.screens import home
