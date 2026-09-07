@@ -1,4 +1,5 @@
 """Library — pill filters over an album grid and an artist list."""
+import math
 import os
 
 os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -65,6 +66,34 @@ def db(tmp_path):
             (ar, f"Album {n}"))
     conn.commit()
     return conn
+
+
+@pytest.fixture
+def db_multi(tmp_path):
+    """One artist with four albums — the smallest library where
+
+    ceil(n / COLS) differs from n, so the grid/list row-count mismatch and the
+    unreachable-rows bug become visible.
+    """
+    conn = open_db(tmp_path / "multi.db")
+    run_migrations(conn)
+    ar = conn.execute("INSERT INTO artists (name) VALUES (?)",
+                      ("Prolific",)).lastrowid
+    for n in range(4):
+        conn.execute(
+            "INSERT INTO albums (artist_id, title, year) VALUES (?, ?, ?)",
+            (ar, f"Rec {n}", 2000 + n))
+    conn.commit()
+    return conn
+
+
+def _drill_into_prolific(db_multi):
+    s = LibraryScreen(FakeApp(db_multi))
+    s.on_enter()
+    s.set_pill(1)
+    s._sel = 0
+    s._select()          # drill into the artist (inside Library, no push)
+    return s
 
 
 def test_grid_geometry_fills_the_width():
@@ -149,5 +178,83 @@ def test_go_up_returns_to_the_artist_list(db):
     s._sel = 0
     s._select()
     s.go_up()
+    assert s.artist_id == 0
+    assert [i.label for i in s.items] == ["Alpha", "Beta"]
+
+
+# ── artist drill-in renders and behaves as an album grid ─────────────────────
+
+def test_drilled_in_artist_is_in_grid_mode_and_draws(db_multi):
+    """Symptom 1: the drill-in must render as the grid, not artist cards."""
+    s = _drill_into_prolific(db_multi)
+    assert [i.label for i in s.items] == ["Rec 0", "Rec 1", "Rec 2", "Rec 3"]
+    assert s._grid_mode is True
+    # draws without crashing and stays in grid mode
+    s.draw(pygame.Surface((320, 480)), FakeStatus())
+    assert s._grid_mode is True
+
+
+def test_drilled_in_draw_lays_out_grid_rows_not_item_rows(db_multi):
+    """Symptom 2: draw must pass the same row count set_count received,
+
+    else rows past the second land below the clip and cannot be scrolled to.
+    """
+    s = _drill_into_prolific(db_multi)
+    assert s._klist.count == math.ceil(len(s.items) / library.COLS) == 2
+
+    captured = []
+    real = s.draw_list_viewport
+    s.draw_list_viewport = lambda surface, n: (captured.append(n),
+                                               real(surface, n))[1]
+    s.draw(pygame.Surface((320, 480)), FakeStatus())
+    assert captured == [s._klist.count]
+
+
+def test_drilled_in_select_opens_the_album(db_multi):
+    """Symptom 3: selecting an album in the drill-in must push AlbumScreen."""
+    s = _drill_into_prolific(db_multi)
+    s._sel = 2                     # "Rec 2" — a row past the first grid row
+    s._select()
+    assert len(s.app.stack) == 1
+    assert type(s.app.stack[-1]).__name__ == "AlbumScreen"
+
+
+def test_go_up_after_drill_returns_to_artist_pill(db_multi):
+    s = _drill_into_prolific(db_multi)
+    s.go_up()
+    assert s.pill == 1
+    assert s._grid_mode is False
+    assert [i.label for i in s.items] == ["Prolific"]
+
+
+# ── handle_touch hit-testing ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("col,expected", [(0, 0), (1, 1), (2, 2)])
+def test_tap_maps_x_to_the_grid_column(db_multi, col, expected):
+    s = LibraryScreen(FakeApp(db_multi))
+    s.on_enter()                                  # Albums pill, 4 albums
+    x = library.MARGIN + col * (library.CELL + library.GAP) + 4
+    s.handle_touch(x, s.list_y + 4)
+    assert s._sel == expected
+
+
+def test_tap_on_a_pill_switches_pills(db):
+    s = LibraryScreen(FakeApp(db))
+    s.on_enter()
+    s.draw(pygame.Surface((320, 480)), FakeStatus())   # populates _pill_rects
+    rect = s._pill_rects[1]
+    s.handle_touch(rect.centerx, rect.centery)
+    assert s.pill == 1
+    assert [i.label for i in s.items] == ["Alpha", "Beta"]
+
+
+def test_tap_on_the_back_crumb_goes_up(db):
+    s = LibraryScreen(FakeApp(db))
+    s.on_enter()
+    s.set_pill(1)
+    s._sel = 0
+    s._select()                                   # drilled into "Alpha"
+    assert s.artist_id != 0
+    s.handle_touch(20, 40)                         # y < PILL_Y, x < 120
     assert s.artist_id == 0
     assert [i.label for i in s.items] == ["Alpha", "Beta"]

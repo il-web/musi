@@ -16,7 +16,6 @@ import pygame
 
 from musi.player import (album_queries, art_cache, audio_detect, backdrop,
                          icons, statusbar, theme)
-from musi.player.input import Button
 from musi.player.list_screen import ListScreen
 from musi.player.mpd_client import PlayerStatus
 
@@ -25,6 +24,7 @@ NAV_Y  = 406
 
 MARGIN, GAP, COLS = 12, 8, 3
 CELL   = (320 - MARGIN * 2 - GAP * (COLS - 1)) // COLS   # 93
+# grid fills the width: 12*2 + 3*93 + 2*8 = 24 + 279 + 16 = 319 <= 320
 TEXT_H = 28
 ROW_H  = CELL + TEXT_H + GAP                             # 129
 ARTIST_H = 52
@@ -52,6 +52,11 @@ class LibraryScreen(ListScreen):
         self.artist_name = ""
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
+
+    @property
+    def _grid_mode(self) -> bool:
+        """Albums render as a grid: the Albums pill, or inside an artist."""
+        return self.pill == 0 or bool(self.artist_id)
 
     def on_enter(self) -> None:
         self._load()
@@ -100,7 +105,7 @@ class LibraryScreen(ListScreen):
                          (MARGIN, TITLE_Y))
             self._draw_pills(surface)
 
-        rows = (math.ceil(len(self.items) / COLS) if self.pill == 0
+        rows = (math.ceil(len(self.items) / COLS) if self._grid_mode
                 else len(self.items))
         self.draw_list_viewport(surface, rows)
 
@@ -124,7 +129,7 @@ class LibraryScreen(ListScreen):
             x = rect.right + 8
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
-        if self.pill == 1:
+        if not self._grid_mode:
             self._draw_artist_row(surface, y, di)
             return
         for col in range(COLS):
@@ -161,7 +166,7 @@ class LibraryScreen(ListScreen):
 
     # ── input ─────────────────────────────────────────────────────────────────
 
-    def handle_touch(self, x: int, y: int) -> "Button | None":
+    def handle_touch(self, x: int, y: int):
         if self.artist_id and y < PILL_Y and x < 120:
             self.go_up()
             return None
@@ -175,7 +180,7 @@ class LibraryScreen(ListScreen):
             return super().handle_touch(x, y)
 
         row = self._klist.index_at(y - self.list_y)
-        if self.pill == 0:
+        if self._grid_mode:
             col = min(COLS - 1, max(0, (x - MARGIN) // (CELL + GAP)))
             di  = row * COLS + col
         else:
@@ -189,7 +194,7 @@ class LibraryScreen(ListScreen):
 
     def _select(self) -> None:
         item = self.items[self._sel]
-        if self.pill == 0:
+        if self._grid_mode:
             from musi.player.screens.album import AlbumScreen
             self.app.push(AlbumScreen(self.app, item.row_id))
         else:
