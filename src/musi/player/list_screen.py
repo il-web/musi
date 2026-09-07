@@ -56,7 +56,7 @@ class ListScreen(Screen):
 
         surface.set_clip(clip)
         
-        # draw_scrollbar is drawn unconditionally in BrowseScreen right after loop
+        # draw_scrollbar is drawn unconditionally right after the row loop
         draw_scrollbar(surface, 314, self.list_y, self.view_h, self._klist)
 
     def _draw_row(self, surface: pygame.Surface, y: int, index: int) -> None:

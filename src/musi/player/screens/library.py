@@ -206,8 +206,8 @@ class LibraryScreen(ListScreen):
         """Show one artist's albums as the grid, with a back crumb.
 
         This is a level within Library rather than a pushed screen: the nav row
-        stays, and the grid drawing is already here. It replaces browse.py's
-        level 1.
+        stays, and the grid drawing is already here. It replaces the old
+        Artists-then-Albums drill-in that the retired tab-strip screen carried.
         """
         self.artist_id   = artist_id
         self.artist_name = name

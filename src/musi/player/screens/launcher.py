@@ -190,7 +190,7 @@ class LauncherScreen(Screen):
     def _open(self, idx: int) -> None:
         key = self.APPS[idx][0]
         if key == "music":
-            from musi.player.screens.music_host import MusicHostScreen
+            from musi.player.screens.music import MusicHostScreen
             self.app.push(MusicHostScreen(self.app))
         elif key == "settings":
             from musi.player.screens.settings import SettingsScreen

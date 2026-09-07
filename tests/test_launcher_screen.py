@@ -179,7 +179,7 @@ def test_draw_mid_drag_runs(app):
 
 def test_music_tile_opens_the_new_host(app):
     from musi.player.screens.launcher import LauncherScreen
-    from musi.player.screens.music_host import MusicHostScreen
+    from musi.player.screens.music import MusicHostScreen
     s = LauncherScreen(app)
     app.stack.append(s)
     s._open(0)
