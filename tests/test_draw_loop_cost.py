@@ -165,3 +165,40 @@ def test_launcher_with_a_wallpaper_does_no_file_io_per_frame(app, tmp_path, monk
     assert loads == []
     prefs.reload()
     wallpaper.clear_cache()
+
+
+def test_home_draw_does_no_sql_after_the_first_frame(app):
+    from musi.player.screens.home import HomeScreen
+    surface = pygame.Surface((320, 480))
+    s = HomeScreen(app)
+    s.on_enter()
+    s.draw(surface, FakeStatus())
+
+    app.db.queries = 0
+    for _ in range(20):
+        s.draw(surface, FakeStatus())
+    assert app.db.queries == 0
+
+
+def test_library_draw_does_no_sql_after_the_first_frame(app):
+    from musi.player.screens.library import LibraryScreen
+    surface = pygame.Surface((320, 480))
+    s = LibraryScreen(app)
+    s.on_enter()
+    s.draw(surface, FakeStatus())
+
+    app.db.queries = 0
+    for _ in range(20):
+        s.draw(surface, FakeStatus())
+    assert app.db.queries == 0
+
+
+def test_backdrop_is_not_rebuilt_every_frame(tmp_path):
+    """Two smoothscales per frame would cost more than the blur saves."""
+    from musi.player import backdrop
+    png = tmp_path / "bd.png"
+    pygame.image.save(pygame.Surface((200, 200)), str(png))
+    backdrop.clear_cache()
+    first = backdrop.surface(str(png))
+    for _ in range(20):
+        assert backdrop.surface(str(png)) is first
