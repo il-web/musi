@@ -81,7 +81,7 @@ def test_tap_on_the_tile_opens_the_app(app):
     s = _launcher(app)
     s.on_press(160, 160)
     s.on_release(160, 160)
-    assert app.stack[-1].__class__.__name__ == "MusicScreen"
+    assert app.stack[-1].__class__.__name__ == "MusicHostScreen"
 
 
 def test_swipe_does_not_open_an_app(app):
@@ -175,3 +175,12 @@ def test_draw_mid_drag_runs(app):
     s.on_press(240, 160)
     s.on_drag(180, 160)
     s.draw(surface, FakeStatus())
+
+
+def test_music_tile_opens_the_new_host(app):
+    from musi.player.screens.launcher import LauncherScreen
+    from musi.player.screens.music_host import MusicHostScreen
+    s = LauncherScreen(app)
+    app.stack.append(s)
+    s._open(0)
+    assert isinstance(app.stack[-1], MusicHostScreen)
