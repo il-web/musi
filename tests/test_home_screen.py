@@ -239,7 +239,7 @@ def test_three_shelves_have_a_scrollable_extent(tmp_path):
     s = HomeScreen(FakeApp(_library(tmp_path, with_history=True)))
     s.on_enter()
     assert len(s.shelves) == 3
-    assert s._max_scroll == 3 * home.SHELF_H - 320 == 130
+    assert s._max_scroll == 3 * home.SHELF_H - 320 == 133
 
 
 def test_one_shelf_does_not_scroll(tmp_path):

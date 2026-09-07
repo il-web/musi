@@ -28,7 +28,8 @@ from musi.player.widgets import Shelf
 LIST_Y = 26
 NAV_Y  = 406
 
-CELL   = 92          # album cover edge
+CELL   = 93          # album cover edge — matches library.CELL so the art
+                     # thumbnail cache is keyed once, not twice, per cover
 GAP    = 10
 MARGIN = 12
 TEXT_H = 30          # title + artist under a cover
