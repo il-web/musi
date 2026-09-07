@@ -70,9 +70,20 @@ def app(tmp_path):
     run_migrations(conn)
     artist = conn.execute("INSERT INTO artists (name) VALUES ('Artist')").lastrowid
     for n in range(3):
-        conn.execute(
+        album = conn.execute(
             "INSERT INTO albums (artist_id, title, year) VALUES (?, ?, 2025)",
-            (artist, f"Album {n}"))
+            (artist, f"Album {n}")).lastrowid
+        # Every Home shelf inner-joins tracks (and play_history for two of the
+        # three), so without these rows HomeScreen.is_empty is True and draw()
+        # returns before touching a shelf — the zero-SQL assertion would then
+        # be checking the empty state, not the shelf draw path it exists for.
+        track = conn.execute(
+            """INSERT INTO tracks (album_id, artist_id, path, title, file_mtime)
+               VALUES (?, ?, ?, 'Track', ?)""",
+            (album, artist, f"/m/t{n}.mp3", 100 + n)).lastrowid
+        conn.execute(
+            "INSERT INTO play_history (track_id, played_at) VALUES (?, ?)",
+            (track, 10 + n))
     conn.commit()
     return FakeApp(CountingDB(conn))
 
@@ -165,3 +176,40 @@ def test_launcher_with_a_wallpaper_does_no_file_io_per_frame(app, tmp_path, monk
     assert loads == []
     prefs.reload()
     wallpaper.clear_cache()
+
+
+def test_home_draw_does_no_sql_after_the_first_frame(app):
+    from musi.player.screens.home import HomeScreen
+    surface = pygame.Surface((320, 480))
+    s = HomeScreen(app)
+    s.on_enter()
+    s.draw(surface, FakeStatus())
+
+    app.db.queries = 0
+    for _ in range(20):
+        s.draw(surface, FakeStatus())
+    assert app.db.queries == 0
+
+
+def test_library_draw_does_no_sql_after_the_first_frame(app):
+    from musi.player.screens.library import LibraryScreen
+    surface = pygame.Surface((320, 480))
+    s = LibraryScreen(app)
+    s.on_enter()
+    s.draw(surface, FakeStatus())
+
+    app.db.queries = 0
+    for _ in range(20):
+        s.draw(surface, FakeStatus())
+    assert app.db.queries == 0
+
+
+def test_backdrop_is_not_rebuilt_every_frame(tmp_path):
+    """Two smoothscales per frame would cost more than the blur saves."""
+    from musi.player import backdrop
+    png = tmp_path / "bd.png"
+    pygame.image.save(pygame.Surface((200, 200)), str(png))
+    backdrop.clear_cache()
+    first = backdrop.surface(str(png))
+    for _ in range(20):
+        assert backdrop.surface(str(png)) is first

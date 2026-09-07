@@ -59,3 +59,25 @@ def test_idle_bar_still_draws():
     surface.fill((0, 0, 0))
     minibar.draw(surface, FakeApp(), FakeStatus())
     assert surface.get_at((160, 450))[:3] != (0, 0, 0)
+
+
+def test_draw_honours_a_y_offset():
+    """The dock draws this strip at 406, not 436."""
+    surface = pygame.Surface((320, 480))
+    surface.fill((0, 0, 0))
+    minibar.draw(surface, FakeApp(), FakeStatus(title="Song", artist="Band"),
+                 y=406)
+    assert surface.get_at((160, 420))[:3] != (0, 0, 0)   # inside the strip
+    assert surface.get_at((160, 400))[:3] == (0, 0, 0)   # above it, untouched
+
+
+def test_hit_honours_a_bar_y():
+    assert minibar.hit(160, 405, bar_y=406) is None
+    assert minibar.hit(100, 420, bar_y=406) == "open"
+    assert minibar.hit(300, 420, bar_y=406) == "toggle"
+
+
+def test_default_y_is_unchanged():
+    """Every existing caller must be unaffected."""
+    assert minibar.hit(100, 458) == "open"
+    assert minibar.hit(160, 435) is None

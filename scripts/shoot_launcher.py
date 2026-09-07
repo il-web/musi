@@ -62,7 +62,7 @@ def main() -> None:
     surface = pygame.Surface((320, 480))
 
     from musi.player.screens.launcher import LauncherScreen
-    from musi.player.screens.music import MusicScreen
+    from musi.player.screens.music import MusicHostScreen
     from musi.player.screens.clock import ClockScreen
     from musi.player.screens.sleep import SleepScreen
     from musi.player.screens.customization import CustomizationScreen
@@ -101,10 +101,12 @@ def main() -> None:
         prefs.set("wallpaper", was)
         app.stack.pop()
 
-    music = MusicScreen(app)
+    from musi.player import dock
+
+    music = MusicHostScreen(app)
     app.stack.append(music)
     music.on_enter()            # tab 0's child loads its rows here, not in set_tab
-    for i in range(4):
+    for i in range(len(dock.TABS)):
         music.set_tab(i)
         music.draw(surface, Status())
         pygame.image.save(surface, str(out / f"music-{i}.png"))

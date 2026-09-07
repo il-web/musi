@@ -234,6 +234,60 @@ class Carousel:
         return pages
 
 
+class Shelf:
+    """Horizontal art strip — KineticList's scroll model on the x axis.
+
+    Home stacks several of these. The physics are identical to a vertical
+    list's, so this wraps a KineticList whose "row height" is one item plus
+    its gap, rather than restating momentum and clamping a second time.
+    """
+
+    def __init__(self, item_w: int, gap: int, view_w: int = 320) -> None:
+        self.item_w = item_w
+        self.gap    = gap
+        self.pitch  = item_w + gap
+        self._k     = KineticList(self.pitch, view_w)
+
+    @property
+    def max_offset(self) -> float:
+        return self._k.max_offset
+
+    def set_count(self, n: int, reset: bool = False) -> None:
+        self._k.set_count(n, reset)
+
+    # ── gesture input ──────────────────────────────────────────────────────────
+
+    def start_touch(self) -> None:
+        self._k.start_touch()
+
+    def drag_by(self, dx: float) -> None:
+        """Finger moved dx px (positive = rightward); content follows."""
+        self._k.scroll_by(dx)
+
+    def end_touch(self) -> None:
+        self._k.end_touch()
+
+    # ── per-frame ──────────────────────────────────────────────────────────────
+
+    def update(self) -> bool:
+        return self._k.update()
+
+    # ── geometry ───────────────────────────────────────────────────────────────
+
+    def first_visible(self) -> int:
+        return self._k.first_visible()
+
+    def pixel_shift(self) -> int:
+        return self._k.pixel_shift()
+
+    def visible_cols(self) -> int:
+        return self._k.visible_rows()
+
+    def index_at(self, x_view: float) -> int:
+        """Item index for an x relative to the shelf's left edge."""
+        return self._k.index_at(x_view)
+
+
 class PendingTap:
     """Defers a tap action briefly so the pressed row is visibly highlighted."""
 

@@ -1,4 +1,4 @@
-"""Now Playing screen — full-art backdrop with transport controls."""
+"""Now Playing screen — edge-to-edge art hero over a solid control panel."""
 
 from __future__ import annotations
 
@@ -12,21 +12,25 @@ from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
-# Layout — 320×480 panel (art + transport + secondary row + volume)
-ART_W, ART_H = 220, 220
-ART_X = (320 - ART_W) // 2   # centred → 50
-ART_Y = 32
-INFO_Y   = ART_Y + ART_H + 12   # 264 title
-ARTIST_Y = INFO_Y + 26          # 290 artist
-BAR_Y    = ARTIST_Y + 28        # 318 progress bar
-BAR_X    = 16                   # progress bar left edge
-BAR_W    = 288                  # progress bar width (16 → 304)
-TIME_Y   = BAR_Y + 10           # 328 time
-CTRL_Y   = TIME_Y + 38          # 366 transport row
-SEC_Y    = CTRL_Y + 40          # 406 shuffle/repeat/queue row
-VOL_Y    = SEC_Y + 34           # 440 volume slider
-VOL_X    = 40                   # slider left edge
-VOL_W    = 224                  # slider width (40 → 264)
+# Layout — 320×480 hero: art bleeds from the top edge into a solid panel.
+# Art area is 320×252 (1.7× the old 220×220 card) and every control today's
+# screen had still fits: shuffle | repeat | lyrics | Queue, plus the volume
+# slider. Do not trade the slider for an icon — this device has no hardware
+# volume control.
+ART_BLEED_H = 252               # art runs 0..252, full width
+FADE_H      = 70                # art dissolves into the panel over this span
+
+INFO_Y   = 258                  # title
+ARTIST_Y = 282                  # artist · album
+BAR_Y    = 312                  # progress bar
+BAR_X    = 16
+BAR_W    = 288
+TIME_Y   = BAR_Y + 10           # 322
+CTRL_Y   = 362                  # transport row
+SEC_Y    = 412                  # shuffle / repeat / lyrics / queue
+VOL_Y    = 452                  # volume slider
+VOL_X    = 40
+VOL_W    = 224
 
 
 class NowPlayingScreen(Screen):
@@ -39,7 +43,6 @@ class NowPlayingScreen(Screen):
         super().__init__(app)
 
         # art / palette (reload on track change)
-        self._backdrop: pygame.Surface | None = None
         self._art:      pygame.Surface | None = None
         self._accent:   tuple = theme.ACCENT
         self._cached_path: str | None = "UNSET"
@@ -76,24 +79,27 @@ class NowPlayingScreen(Screen):
         self._reload_art(status)
         self._update_text_cache(status)
 
-        # 1 — background (backdrop or solid)
-        if self._backdrop:
-            surface.blit(self._backdrop, (0, 0))
-        else:
-            surface.fill(theme.BG)
-
-        # 2 — status bar
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
-
-        # 3 — album art thumbnail
-        art_rect = pygame.Rect(ART_X, ART_Y, ART_W, ART_H)
+        # 1 — art bleeding from the top edge, dissolving into the panel
+        surface.fill(theme.BG)
         if self._art:
-            surface.blit(self._art, (ART_X, ART_Y))
-            pygame.draw.rect(surface, self._accent, art_rect, 2, border_radius=4)
+            surface.blit(self._art, (0, -10))
         else:
-            pygame.draw.rect(surface, theme.CARD_BG, art_rect, border_radius=4)
+            pygame.draw.rect(surface, theme.CARD_BG, (0, 0, 320, ART_BLEED_H))
             lbl = theme.render("no track", 13, theme.DIM)
-            surface.blit(lbl, lbl.get_rect(center=art_rect.center))
+            surface.blit(lbl, lbl.get_rect(center=(160, ART_BLEED_H // 2)))
+
+        fade = pygame.Surface((320, FADE_H), pygame.SRCALPHA)
+        for i in range(FADE_H):
+            fade.fill((10, 10, 15, int(255 * (i / FADE_H) ** 1.6)),
+                      (0, i, 320, 1))
+        surface.blit(fade, (0, ART_BLEED_H - FADE_H))
+        pygame.draw.rect(surface, theme.BG,
+                         (0, ART_BLEED_H, 320, 480 - ART_BLEED_H))
+
+        # 2 — status bar on a solid band; the art washed the clock out
+        pygame.draw.rect(surface, (8, 8, 13), (0, 0, 320, 26))
+        statusbar.draw(surface, status, audio_detect.get_audio_type(),
+                       show_back=len(self.app.stack) > 1)
 
         # 5 — track title + artist (shadow then text for readability)
         if self._title_surf:
@@ -170,7 +176,7 @@ class NowPlayingScreen(Screen):
                 self._open_queue()
             return None
         # tapping the album art toggles play/pause (big target)
-        if ART_Y <= y <= ART_Y + ART_H:
+        if 26 <= y <= ART_BLEED_H:
             return Button.PLAY_PAUSE
         return None
 
@@ -239,16 +245,14 @@ class NowPlayingScreen(Screen):
         if status.path == self._cached_path:
             return
         self._cached_path = status.path
-        self._backdrop    = None
         self._art         = None
         self._accent      = theme.ACCENT
 
-        if not status.path:
+        if not status.path or self.app.db is None:
             return
 
         res = art_cache.get_track_art_and_palette(self.app.db, status.path, status.artist, status.album)
-        self._backdrop = art_cache.load_surface(res["backdrop_path"], (320, 480))
-        self._art = art_cache.load_surface(res["art_path"], (ART_W, ART_H))
+        self._art = art_cache.load_surface(res["art_path"], (320, 320))
         self._accent = art_cache.parse_palette(res["palette"])
 
     def _update_text_cache(self, status: PlayerStatus) -> None:
@@ -264,10 +268,11 @@ class NowPlayingScreen(Screen):
             self._prev_meta  = meta
             self._meta_surf  = theme.render(meta, 13, theme.WHITE, max_width=296)
 
-        elapsed_s = int(status.elapsed)
+        elapsed = getattr(status, "elapsed", status.progress * status.duration)
+        elapsed_s = int(elapsed)
         if elapsed_s != self._prev_elapsed:
             self._prev_elapsed = elapsed_s
-            t = f"{_fmt(status.elapsed)}  /  {_fmt(status.duration)}"
+            t = f"{_fmt(elapsed)}  /  {_fmt(status.duration)}"
             self._time_surf = theme.render(t, 11, theme.WHITE)
 
 

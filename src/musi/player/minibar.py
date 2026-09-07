@@ -27,36 +27,40 @@ _prev_title:  str = ""
 _prev_meta:   str = ""
 
 
-def draw(surface: pygame.Surface, app, status) -> None:
-    """Draw the bar at BAR_Y. Call after the screen's own content."""
+def draw(surface: pygame.Surface, app, status, y: int = BAR_Y) -> None:
+    """Draw the bar at ``y``. Call after the screen's own content.
+
+    ``y`` defaults to BAR_Y so every existing caller is unaffected; the music
+    app's dock passes DOCK_Y so the strip and the nav row read as one unit.
+    """
     _reload_art(app, status)
     _update_text(status)
 
-    pygame.draw.rect(surface, theme.CARD_BG, (0, BAR_Y, 320, BAR_H))
-    pygame.draw.line(surface, (30, 30, 44), (0, BAR_Y), (320, BAR_Y), 1)
+    pygame.draw.rect(surface, theme.CARD_BG, (0, y, 320, BAR_H))
+    pygame.draw.line(surface, (30, 30, 44), (0, y), (320, y), 1)
 
     if _art:
-        surface.blit(_art, (8, BAR_Y + 6))
+        surface.blit(_art, (8, y + 6))
     else:
-        pygame.draw.rect(surface, (40, 40, 55), (8, BAR_Y + 6, 32, 32),
+        pygame.draw.rect(surface, (40, 40, 55), (8, y + 6, 32, 32),
                          border_radius=4)
-        icons.draw_music_note(surface, 24, BAR_Y + 22, (80, 80, 100))
+        icons.draw_music_note(surface, 24, y + 22, (80, 80, 100))
 
     if _title_surf:
-        surface.blit(_title_surf, (48, BAR_Y + 8))
+        surface.blit(_title_surf, (48, y + 8))
     if _meta_surf:
-        surface.blit(_meta_surf, (48, BAR_Y + 25))
+        surface.blit(_meta_surf, (48, y + 25))
 
     col = _accent if status.state == "play" else (110, 110, 125)
     if status.state == "play":
-        icons.draw_pause(surface, _CTRL_X + 12, BAR_Y + 22, col)
+        icons.draw_pause(surface, _CTRL_X + 12, y + 22, col)
     else:
-        icons.draw_play(surface, _CTRL_X + 12, BAR_Y + 22, col)
+        icons.draw_play(surface, _CTRL_X + 12, y + 22, col)
 
 
-def hit(x: int, y: int) -> str | None:
+def hit(x: int, y: int, bar_y: int = BAR_Y) -> "str | None":
     """Classify a tap: 'toggle' on the control, 'open' on the body, else None."""
-    if y < BAR_Y:
+    if y < bar_y:
         return None
     return "toggle" if x >= _CTRL_X else "open"
 

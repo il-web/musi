@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import pygame
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -68,3 +70,21 @@ def render(
             text = text[:-1]
         text = text + "..." if text else text
     return f.render(text, True, colour)
+
+
+@lru_cache(maxsize=256)
+def render_cached(
+    text: str,
+    size: int,
+    colour: tuple = TEXT,
+    bold: bool = False,
+    max_width: int = 0,
+) -> pygame.Surface:
+    """render() memoised for text drawn every frame — list and grid labels.
+
+    Screens that redraw the same labels each frame (the Home shelves, the
+    Library grid) would otherwise pay a fresh rasterisation plus, with
+    max_width set, one f.size() call per character trimmed. The returned
+    surface is shared: callers must treat it as read-only.
+    """
+    return render(text, size, colour, bold, max_width)
