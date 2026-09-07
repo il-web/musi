@@ -18,7 +18,7 @@ from musi.player.widgets import draw_scrollbar
 BAR_H   = 26          # status bar height (matches statusbar.BAR_H)
 BOX_H   = 36          # search box height
 ITEM_H  = 54          # height per result row
-KB_TOP  = 316         # on-screen keyboard docks here; results fill above it
+KB_TOP  = 314         # keyboard bottom lands exactly on dock.NAV_Y (450)
 
 _CURSOR_BLINK = 0.55   # seconds per blink half-cycle
 
