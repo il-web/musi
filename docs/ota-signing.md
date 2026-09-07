@@ -57,7 +57,7 @@ This file is public — it's safe to email, commit, or paste anywhere.
 
 ## 4. On the Pi — import and trust it
 
-Copy the file over, from Windows:
+Copy the file over from your dev machine:
 
 ```sh
 scp musi-signing.pub musi@musi.local:~/
@@ -68,7 +68,7 @@ interactive `gpg --edit-key` prompt, which is painful over SSH:
 
 ```sh
 gpg --import ~/musi-signing.pub
-echo "CE2574AF3AB61492EFC9A5D852BA31D3E4F34050:6:" | gpg --import-ownertrust
+echo "554FC6C5E79E9F18AFE862732BE3D6BAA4B77A77:6:" | gpg --import-ownertrust
 rm ~/musi-signing.pub
 ```
 
@@ -82,13 +82,20 @@ Check it landed:
 gpg --list-keys --keyid-format=long        # expect [ultimate] next to the uid
 ```
 
-**Current key** (musi, generated 2026-08-07, expires 2028-08-06):
+**Current key** (musi, generated 2026-09-07, expires 2028-09-06):
 
 ```
-ed25519/52BA31D3E4F34050
-CE2574AF3AB61492EFC9A5D852BA31D3E4F34050
+ed25519/2BE3D6BAA4B77A77
+554FC6C5E79E9F18AFE862732BE3D6BAA4B77A77
 Ilay <4ilayf@gmail.com>
 ```
+
+**Rotated 2026-09-07.** The previous key — `ed25519/52BA31D3E4F34050`,
+fingerprint `CE2574AF3AB61492EFC9A5D852BA31D3E4F34050` — was lost with the dev
+machine it lived on, so it was replaced via "If you get locked out" below. A Pi
+that still trusts only the old fingerprint will reject every update until the
+new public key is imported: run step 4 again. The old key is dead, not
+compromised, so there is nothing to revoke.
 
 ## 5. Verify end to end
 
