@@ -6,6 +6,11 @@ first boot only "New in your library" has rows, and it works from file_mtime
 the moment music lands.
 
 All three queries run in on_enter. draw() must stay free of SQL.
+
+Three full-size shelves are taller than the content band, so the shelf region
+(FIRST_Y..nav_y) scrolls vertically; the greeting stays a fixed header. A
+single gesture is axis-locked on the first slop of movement: it either drags
+one shelf horizontally or scrolls the page vertically, never both.
 """
 from __future__ import annotations
 
@@ -15,7 +20,6 @@ import pygame
 
 from musi.player import (album_queries, art_cache, audio_detect, backdrop,
                          statusbar, theme)
-from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import Shelf
@@ -31,7 +35,6 @@ LABEL_H = 20         # shelf heading
 SHELF_H = LABEL_H + CELL + TEXT_H + 8
 
 GREET_Y = 34
-SUB_Y   = 63
 FIRST_Y = 86
 
 _SLOP = 12         # matches app.TAP_SLOP_PX — movement below this is a tap
@@ -64,12 +67,20 @@ class HomeScreen(Screen):
         self._greet_surf: pygame.Surface | None = None
         self._greet_text = ""
         self._moving = False
-        # captured horizontal gesture: which shelf, and where it started
+
+        # vertical scroll of the shelf region (greeting is a fixed header)
+        self._view_h = self.nav_y - FIRST_Y
+        self._scroll = 0.0
+        self._max_scroll = 0.0
+
+        # captured gesture: which shelf, where it started, and its locked axis
         self._drag: "Shelf | None" = None
         self._drag_rows: list = []
+        self._axis: "str | None" = None
         self._press_x = 0
         self._press_y = 0
         self._last_x  = 0
+        self._last_y  = 0
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -86,6 +97,11 @@ class HomeScreen(Screen):
             shelf = Shelf(item_w=CELL, gap=GAP, view_w=320 - MARGIN)
             shelf.set_count(len(rows), reset=True)
             self.shelves.append((title, rows, shelf))
+
+        self._scroll = 0.0
+        view_h = self.nav_y - FIRST_Y
+        self._view_h = view_h
+        self._max_scroll = max(0.0, len(self.shelves) * SHELF_H - view_h)
 
     @property
     def is_empty(self) -> bool:
@@ -118,12 +134,16 @@ class HomeScreen(Screen):
             return
 
         self._draw_greeting(surface)
-        y = FIRST_Y
-        for title, rows, shelf in self.shelves:
-            if y >= self.nav_y:
-                break
-            self._draw_shelf(surface, y, title, rows, shelf)
-            y += SHELF_H
+
+        region = pygame.Rect(0, FIRST_Y, 320, self._view_h)
+        clip = surface.get_clip()
+        surface.set_clip(region)
+        for i, (title, rows, shelf) in enumerate(self.shelves):
+            y = FIRST_Y + i * SHELF_H - self._scroll
+            if y >= region.bottom or y + SHELF_H <= region.top:
+                continue
+            self._draw_shelf(surface, y, title, rows, shelf, region)
+        surface.set_clip(clip)
 
     def _draw_greeting(self, surface: pygame.Surface) -> None:
         text = greeting(datetime.now().hour)
@@ -132,13 +152,13 @@ class HomeScreen(Screen):
             self._greet_surf = theme.render(text, 21, theme.WHITE, bold=True)
         surface.blit(self._greet_surf, (MARGIN, GREET_Y))
 
-    def _draw_shelf(self, surface, y, title, rows, shelf) -> None:
+    def _draw_shelf(self, surface, y, title, rows, shelf, region) -> None:
         surface.blit(theme.render(title, 12, theme.WHITE, bold=True),
                      (MARGIN, y))
         ay = y + LABEL_H
 
-        clip = surface.get_clip()
-        surface.set_clip(pygame.Rect(MARGIN, ay, 320 - MARGIN, CELL + TEXT_H))
+        hband = pygame.Rect(MARGIN, int(ay), 320 - MARGIN, CELL + TEXT_H)
+        surface.set_clip(hband.clip(region))
         first = shelf.first_visible()
         shift = shelf.pixel_shift()
         for vi in range(shelf.visible_cols()):
@@ -147,7 +167,7 @@ class HomeScreen(Screen):
                 break
             x = MARGIN + vi * shelf.pitch - shift
             self._draw_cell(surface, x, ay, rows[di])
-        surface.set_clip(clip)
+        surface.set_clip(region)
 
     def _draw_cell(self, surface, x, y, row) -> None:
         art = art_cache.load_art_thumbnail(row["art_path"] or "", CELL)
@@ -169,57 +189,76 @@ class HomeScreen(Screen):
 
     # ── input ─────────────────────────────────────────────────────────────────
 
+    def _clamp_scroll(self) -> None:
+        self._scroll = max(0.0, min(self._max_scroll, self._scroll))
+
     def _shelf_at(self, y: int):
-        """(rows, shelf, top_y) for the shelf whose art band contains y."""
-        sy = FIRST_Y
-        for _, rows, shelf in self.shelves:
-            ay = sy + LABEL_H
+        """(rows, shelf, art_top_y) for the shelf whose art band contains y.
+
+        Uses the same ``- self._scroll`` offset draw() uses, so a tap lands on
+        the shelf that is actually under the finger once the page is scrolled.
+        """
+        if y < FIRST_Y or y >= self.nav_y:
+            return None
+        for i, (_, rows, shelf) in enumerate(self.shelves):
+            ay = FIRST_Y + i * SHELF_H - self._scroll + LABEL_H
             if ay <= y < ay + CELL:
                 return rows, shelf, ay
-            sy += SHELF_H
         return None
 
-    def handle_touch(self, x: int, y: int) -> "Button | None":
+    def handle_touch(self, x: int, y: int) -> None:
         """Taps outside a shelf only. Taps on a shelf are resolved in
-        on_release, because on_press captures the gesture for scrolling."""
+        on_release, because on_press captures the gesture."""
         return None
 
     def on_press(self, x: int, y: int) -> bool:
-        """Capture the gesture so a horizontal flick scrolls the shelf.
-
-        Returning True routes motion to on_drag and the release to on_release,
-        bypassing the app's tap/scroll plumbing — the same trick the launcher
-        uses. Tap-vs-drag is then resolved on release against _SLOP.
+        """Capture the gesture. Returning True routes motion to on_drag and the
+        release to on_release, bypassing the app's tap/scroll plumbing — the
+        same trick the launcher uses. The axis is locked on first movement in
+        on_drag; a gesture that never passes _SLOP is a tap.
         """
         found = self._shelf_at(y)
         if not found:
             return False
         rows, shelf, _ = found
         self._drag, self._drag_rows = shelf, rows
+        self._axis = None
         self._press_x = self._last_x = x
-        self._press_y = y
+        self._press_y = self._last_y = y
         shelf.start_touch()
         return True
 
     def on_drag(self, x: int, y: int) -> None:
         if self._drag is None:
             return
-        self._drag.drag_by(x - self._last_x)
+        if self._axis is None:
+            if max(abs(x - self._press_x), abs(y - self._press_y)) >= _SLOP:
+                self._axis = ("h" if abs(x - self._press_x) >= abs(y - self._press_y)
+                              else "v")
+        if self._axis == "h":
+            self._drag.drag_by(x - self._last_x)
+        elif self._axis == "v":
+            self._scroll -= y - self._last_y
+            self._clamp_scroll()
         self._last_x = x
+        self._last_y = y
 
     def on_release(self, x: int, y: int) -> None:
         if self._drag is None:
             return
         shelf, rows = self._drag, self._drag_rows
-        moved = abs(x - self._press_x) > _SLOP or abs(y - self._press_y) > _SLOP
         shelf.end_touch()
-        self._drag, self._drag_rows = None, []
+        axis = self._axis
+        self._drag, self._drag_rows, self._axis = None, [], None
 
-        if not moved:
+        if axis is None:                       # never passed the slop → a tap
             di = shelf.index_at(x - MARGIN)
             if 0 <= di < len(rows):
                 from musi.player.screens.album import AlbumScreen
                 self.app.push(AlbumScreen(self.app, rows[di]["id"]))
 
     def handle_scroll(self, dy: float) -> None:
-        """Home is one screenful by design — nothing scrolls vertically."""
+        """Vertical drag that started off a shelf band still scrolls the page.
+        Positive dy = finger moved down; content follows the finger."""
+        self._scroll -= dy
+        self._clamp_scroll()
