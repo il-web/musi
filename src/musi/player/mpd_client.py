@@ -93,6 +93,15 @@ class MusiMPDClient:
     # ── connection ────────────────────────────────────────────────────────────
 
     def connect(self) -> bool:
+        # Clear any socket left attached by a failed command. python-mpd2
+        # refuses to connect while one is (base.py: 'Already connected'), and
+        # every error path below drops our _connected flag without closing it —
+        # so without this, one stalled MPD wedges the UI as permanently
+        # disconnected until the process restarts.
+        try:
+            self._client.disconnect()
+        except Exception:
+            pass
         try:
             self._client.connect(self._host, self._port)
             self._connected = True
