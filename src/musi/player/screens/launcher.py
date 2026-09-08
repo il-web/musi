@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import app_tiles, audio_detect, minibar, prefs, statusbar, theme, wallpaper
+from musi.player import (app_tiles, audio_detect, blit, minibar, prefs, statusbar,
+                         theme, wallpaper)
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -139,15 +140,17 @@ class LauncherScreen(Screen):
         # that separator shows on "none" and is hidden on "warm"/"cool".
         page = pygame.Surface((320, PAGE_H), pygame.SRCALPHA)
 
+        # blit.onto, not page.blit: the page has per-pixel alpha, and an
+        # odd x on such a destination SIGBUSes the Pi (see blit.py).
         tile = app_tiles.render_tile(key)
-        page.blit(tile, tile.get_rect(centerx=160, y=TILE_Y))
+        blit.onto(page, tile, tile.get_rect(centerx=160, y=TILE_Y))
 
         name = theme.render(label, 18, theme.WHITE, bold=True)
-        page.blit(name, name.get_rect(centerx=160, y=LABEL_Y))
+        blit.onto(page, name, name.get_rect(centerx=160, y=LABEL_Y))
 
         if sub:
             sub_s = theme.render(sub, 11, theme.DIM)
-            page.blit(sub_s, sub_s.get_rect(centerx=160, y=SUB_Y))
+            blit.onto(page, sub_s, sub_s.get_rect(centerx=160, y=SUB_Y))
 
         for i in range(len(self.APPS)):
             cx = 160 + (i - (len(self.APPS) - 1) / 2) * 14
