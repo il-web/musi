@@ -99,7 +99,7 @@ class NowPlayingScreen(Screen):
         # 2 — status bar on a solid band; the art washed the clock out
         pygame.draw.rect(surface, (8, 8, 13), (0, 0, 320, 26))
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
-                       show_back=len(self.app.stack) > 1)
+                       show_home=len(self.app.stack) > 1)
 
         # 5 — track title + artist (shadow then text for readability)
         if self._title_surf:

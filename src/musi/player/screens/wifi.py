@@ -310,7 +310,7 @@ class WifiScreen(ListScreen):
             self._nav_surf = theme.render("Esc = back", 10, theme.DIM)
 
         surface.fill(theme.BG)
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
+        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
 
         hdr = theme.render("WiFi", 14, theme.WHITE, bold=True)
         surface.blit(hdr, (14, 24))

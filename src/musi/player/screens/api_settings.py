@@ -104,7 +104,7 @@ class ApiSettingsScreen(Screen):
             self._nav_surf = theme.render("Enter = regenerate   Esc = back", 10, theme.DIM)
 
         surface.fill(theme.BG)
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
+        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
 
         header = theme.render("API", 16, theme.WHITE, bold=True)
         surface.blit(header, (14, 26))

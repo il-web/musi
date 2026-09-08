@@ -17,6 +17,13 @@ def draw_chevron_left(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> 
     pygame.draw.lines(surface, col, False, pts, 2)
 
 
+def draw_home(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
+    """House glyph — roof triangle over a body, sized to the chevron's footprint."""
+    roof = [(cx - 6, cy - 1), (cx, cy - 7), (cx + 6, cy - 1)]
+    pygame.draw.lines(surface, col, False, roof, 2)
+    pygame.draw.rect(surface, col, (cx - 4, cy - 1, 8, 7), 2)
+
+
 def draw_play(surface: pygame.Surface, cx: int, cy: int, col: tuple, size: str = "md") -> None:
     """Play triangle."""
     if size == "sm":

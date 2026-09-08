@@ -74,7 +74,7 @@ class BluetoothScreen(ListScreen):
             )
 
         surface.fill(theme.BG)
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
+        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
 
         # section header
         surface.blit(self._header_surf, (14, 26))

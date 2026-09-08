@@ -92,7 +92,7 @@ class LibraryScreen(ListScreen):
         else:
             surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
-                       show_back=len(self.app.stack) > 1)
+                       show_home=len(self.app.stack) > 1)
 
         if self.artist_id:
             icons.draw_chevron_left(surface, 18, TITLE_Y + 10, theme.ACCENT)

@@ -22,11 +22,12 @@ _prev_minute: int = -1
 
 # ── public ────────────────────────────────────────────────────────────────────
 
-def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = False) -> None:
+def draw(surface: pygame.Surface, status, audio_type: str, show_home: bool = False) -> None:
     """Draw the status bar.  Call before drawing any other screen content.
 
-    When show_back is True, a '‹' back chevron is drawn at the far left and the
-    "musi" logo shifts right to make room for it.
+    When show_home is True, a house glyph is drawn at the far left and the
+    "musi" logo shifts right to make room for it. Tapping it returns to the
+    launcher; going back one step is the left-edge swipe.
     """
     global _logo_surf, _time_surf, _prev_minute
 
@@ -35,10 +36,10 @@ def draw(surface: pygame.Surface, status, audio_type: str, show_back: bool = Fal
 
     cy = BAR_H // 2
 
-    # ── back chevron (left) — only when there's a screen to go back to ─────────
+    # ── home glyph (left) — only when there's somewhere above the launcher ────
     logo_x = 10
-    if show_back:
-        icons.draw_chevron_left(surface, 12, cy, theme.WHITE)
+    if show_home:
+        icons.draw_home(surface, 12, cy, theme.WHITE)
         logo_x = 28
 
     # ── "musi" logo (left) ────────────────────────────────────────────────────

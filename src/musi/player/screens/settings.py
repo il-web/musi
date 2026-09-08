@@ -41,7 +41,7 @@ class SettingsScreen(Screen):
             self._menu_surfs  = [theme.render(m, 16, theme.WHITE) for m in MENU]
 
         surface.fill(theme.BG)
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
+        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
         self._tap.update()
 
         # section header

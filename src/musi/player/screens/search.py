@@ -162,7 +162,7 @@ class SearchScreen(ListScreen):
             self._ph_surf = theme.render("Type to search…", 12, theme.DIM)
 
         surface.fill(theme.BG)
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_back=len(self.app.stack) > 1)
+        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
 
         # ── search box ────────────────────────────────────────────────────────
         box_rect = pygame.Rect(8, self.box_y, 304, BOX_H)

@@ -68,7 +68,7 @@ class ClockScreen(Screen):
 
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
-                       show_back=len(self.app.stack) > 1)
+                       show_home=len(self.app.stack) > 1)
 
         surface.blit(self._hm_surf, self._hm_surf.get_rect(centerx=160, y=HM_Y))
         surface.blit(self._date_surf,
