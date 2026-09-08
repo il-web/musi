@@ -91,6 +91,15 @@ class App:
             self._stack.pop()
             self._stack[-1].on_enter()
 
+    def go_home(self) -> None:
+        """Pop every screen above the root launcher.
+
+        Pops one at a time rather than truncating the list, so each screen's
+        on_exit and the root's on_enter fire exactly as a manual walk back would.
+        """
+        while len(self._stack) > 1:
+            self.pop()
+
     def quit(self) -> None:
         self._running = False
 

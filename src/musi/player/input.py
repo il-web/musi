@@ -1,4 +1,9 @@
-"""Input abstraction — maps keyboard keys (dev) and GPIO buttons (Pi) to Button events."""
+"""Input abstraction — maps keyboard keys (dev machine) to Button events.
+
+The device has no hardware buttons: on the Pi every action arrives as touch,
+resolved in app.py. These mappings exist so the app is drivable on a dev
+machine without a touchscreen.
+"""
 
 from enum import Enum, auto
 
@@ -13,6 +18,7 @@ class Button(Enum):
     DOWN       = auto()
     SELECT     = auto()
     BACK       = auto()
+    HOME       = auto()
     VOL_UP     = auto()
     VOL_DOWN   = auto()
 
@@ -27,6 +33,7 @@ _KEY_MAP: dict[int, Button] = {
     pygame.K_RETURN:     Button.SELECT,
     pygame.K_ESCAPE:     Button.BACK,
     pygame.K_BACKSPACE:  Button.BACK,
+    pygame.K_h:          Button.HOME,
     pygame.K_EQUALS:     Button.VOL_UP,
     pygame.K_PLUS:       Button.VOL_UP,
     pygame.K_MINUS:      Button.VOL_DOWN,

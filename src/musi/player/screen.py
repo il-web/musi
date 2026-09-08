@@ -95,7 +95,19 @@ class Screen(ABC):
     def on_release(self, x: int, y: int) -> None:
         """Called when a captured gesture is released (final finger pos)."""
 
-    def handle(self, button: Button, status: PlayerStatus) -> None:
-        """Handle a button press. Default: BACK pops the screen."""
-        if button == Button.BACK and len(self.app.stack) > 1:
+    def go_back(self) -> None:
+        """Back navigation — the edge swipe and the BACK button both land here.
+
+        Default: pop one screen. Screens holding internal state (a password
+        entry, a sub-mode) override this to unwind one step before popping, so
+        a swipe never throws away more than the user expects.
+        """
+        if len(self.app.stack) > 1:
             self.app.pop()
+
+    def handle(self, button: Button, status: PlayerStatus) -> None:
+        """Handle a button press. BACK goes back one step, HOME to the launcher."""
+        if button == Button.BACK:
+            self.go_back()
+        elif button == Button.HOME:
+            self.app.go_home()
