@@ -12,6 +12,7 @@ import pygame
 
 from musi.player import backlight, theme
 from musi.player.input import Button, key_to_button
+from musi.player.gestures import EDGE_W, resolve_edge_swipe
 from musi.player.mpd_client import MusiMPDClient, PlayerStatus
 from musi.player.screen import Screen
 
@@ -192,6 +193,12 @@ class App:
         self._long_checked: bool  = False  # long-press already evaluated
         self._long_fired:   bool  = False  # long-press handled → swallow the tap
 
+        # back-swipe state — a left-edge drag that resolves to go_back()
+        self._edge_live:  bool  = False   # gesture began in the edge zone
+        self._edge_fired: bool  = False   # already went back; swallow the rest
+        self._edge_dx:    float = 0.0
+        self._edge_dy:    float = 0.0
+
         # screen power state (dim → backlight off after inactivity)
         self._last_input: float = pygame.time.get_ticks() / 1000.0
         self._screen_off: bool  = False
@@ -361,6 +368,16 @@ class App:
         self._long_checked = False
         self._long_fired   = False
         self._captured     = bool(scr.on_press(x, y))
+        # A back swipe is considered only when the screen did not claim the
+        # gesture, and only when there is something to go back to. Together
+        # those exclude the launcher (which captures for paging and is the
+        # root), the volume slider and the queue reorder — no special cases.
+        self._edge_live  = (not self._captured
+                            and x <= EDGE_W
+                            and len(self._stack) > 1)
+        self._edge_fired = False
+        self._edge_dx    = 0.0
+        self._edge_dy    = 0.0
         if not self._captured:
             scr.handle_scroll_start()
 
@@ -370,11 +387,20 @@ class App:
         self._touch_moved += abs(dx) + abs(dy)
         if self._captured:
             self._stack[-1].on_drag(x, y)
-        else:
-            self._stack[-1].handle_scroll(dy)
+            return
+        if self._edge_live and not self._edge_fired:
+            self._edge_dx += dx
+            self._edge_dy += dy
+            if resolve_edge_swipe(self._touch_start[0], self._edge_dx, self._edge_dy):
+                self._edge_fired = True
+                self._stack[-1].go_back()
+                return
+        # Scroll keeps flowing while the swipe is undecided. If it later
+        # resolves as back, the screen pops and the movement is never seen.
+        self._stack[-1].handle_scroll(dy)
 
     def _end_touch(self, x: int, y: int) -> None:
-        if self._touch_start is not None and self._stack:
+        if self._touch_start is not None and self._stack and not self._edge_fired:
             scr = self._stack[-1]
             if self._captured:
                 scr.on_release(x, y)
@@ -386,6 +412,8 @@ class App:
                         scr.handle(btn, self._status)
         self._touch_start = None
         self._captured    = False
+        self._edge_live   = False
+        self._edge_fired  = False
 
     # ── internal ──────────────────────────────────────────────────────────────
 
