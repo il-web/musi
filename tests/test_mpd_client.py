@@ -1,4 +1,7 @@
 """MusiMPDClient unit tests (no real MPD — fake socket client)."""
+import threading
+import time
+
 from musi.player.mpd_client import MusiMPDClient
 
 
@@ -16,6 +19,7 @@ class FakeSocketClient:
 def _client_with_fake():
     c = MusiMPDClient.__new__(MusiMPDClient)   # skip __init__/connect
     c._connected = True
+    c._lock = threading.RLock()               # __init__ normally provides this
     c._client = FakeSocketClient()
     return c
 
@@ -121,3 +125,89 @@ def test_a_refused_connect_still_retries_cleanly(tmp_path):
     c._client.refuse = False
     c._next_retry = 0.0
     assert c.connect() is True
+
+
+class ReentrancyDetector(FakeMPD):
+    """Fails loudly if two threads are inside the client at the same time.
+
+    python-mpd2 is not thread-safe: a command writes to the socket then reads
+    the reply, so two overlapping callers desync the protocol. At startup the
+    loading screen's thread calls connect() every 0.4 s while the main loop
+    polls every 1.0 s, so this overlap is the normal case, not a rare one.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.inside = 0
+        self.overlaps = 0
+
+    def _enter(self):
+        self.inside += 1
+        if self.inside > 1:
+            self.overlaps += 1
+        time.sleep(0.005)          # widen the window so the race is reliable
+
+    def _exit(self):
+        self.inside -= 1
+
+    def connect(self, host, port):
+        self._enter()
+        try:
+            super().connect(host, port)
+        finally:
+            self._exit()
+
+    def status(self):
+        self._enter()
+        try:
+            return super().status()
+        finally:
+            self._exit()
+
+    def currentsong(self):
+        self._enter()
+        try:
+            return super().currentsong()
+        finally:
+            self._exit()
+
+    def ping(self):
+        self._enter()
+        try:
+            super().ping()
+        finally:
+            self._exit()
+
+
+def test_concurrent_callers_are_serialised(tmp_path):
+    """Reproduces the startup overlap: a reconnect loop racing the status poll.
+
+    Without a lock the two interleave inside the client, which is what
+    desyncs a real MPD socket and leaves the UI stuck on "Not connected"."""
+    c = _live_client(tmp_path)
+    c._client = ReentrancyDetector()
+    c.connect()
+
+    stop = threading.Event()
+
+    def reconnector():
+        while not stop.is_set():
+            c._next_retry = 0.0
+            c.connect()
+
+    def poller():
+        while not stop.is_set():
+            c.poll()
+
+    threads = [threading.Thread(target=reconnector), threading.Thread(target=poller)]
+    for t in threads:
+        t.start()
+    time.sleep(0.4)
+    stop.set()
+    for t in threads:
+        t.join()
+
+    assert c._client.overlaps == 0, (
+        f"{c._client.overlaps} overlapping entries — two threads were inside "
+        "the MPD client at once"
+    )

@@ -9,7 +9,9 @@ Wraps python-mpd2 with:
 
 from __future__ import annotations
 
+import functools
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import time
@@ -69,6 +71,21 @@ class QueueItem:
     artist: str
 
 
+def _synchronized(fn):
+    """Serialise access to the MPD socket.
+
+    python-mpd2 is not thread-safe: a command writes to the socket and then
+    reads the reply, so two overlapping callers desync the protocol. The
+    loading screen reconnects from a daemon thread every 0.4 s while the main
+    loop polls every 1.0 s, so that overlap is the normal startup case.
+    """
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return fn(self, *args, **kwargs)
+    return wrapper
+
+
 class MusiMPDClient:
     """Thread-safe(ish) MPD client for the musi player UI."""
 
@@ -85,6 +102,7 @@ class MusiMPDClient:
         self._music_root = Path(music_root)
         self._host = host
         self._port = port
+        self._lock = threading.RLock()   # see _synchronized
         self._client = mpd.MPDClient()
         self._client.timeout = 2
         self._connected = False
@@ -92,6 +110,7 @@ class MusiMPDClient:
 
     # ── connection ────────────────────────────────────────────────────────────
 
+    @_synchronized
     def connect(self) -> bool:
         # Clear any socket left attached by a failed command. python-mpd2
         # refuses to connect while one is (base.py: 'Already connected'), and
@@ -112,6 +131,7 @@ class MusiMPDClient:
             self._next_retry = time() + self.RETRY_BACKOFF_S
             return False
 
+    @_synchronized
     def disconnect(self) -> None:
         try:
             self._client.close()
@@ -121,6 +141,7 @@ class MusiMPDClient:
             logging.warning('Ignored exception', exc_info=True)
         self._connected = False
 
+    @_synchronized
     def _ensure(self) -> bool:
         """Reconnect if needed. Returns True if connected."""
         if self._connected:
@@ -135,6 +156,7 @@ class MusiMPDClient:
 
     # ── status ────────────────────────────────────────────────────────────────
 
+    @_synchronized
     def poll(self) -> PlayerStatus:
         """Fetch current player status. Returns disconnected stub on error."""
         if not self._ensure():
@@ -176,6 +198,7 @@ class MusiMPDClient:
 
     # ── playback controls ─────────────────────────────────────────────────────
 
+    @_synchronized
     def play_pause(self) -> None:
         if not self._ensure():
             return
@@ -188,22 +211,28 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    @_synchronized
     def pause(self) -> None:
         """Pause playback (no-op if already paused/stopped)."""
         self._cmd(lambda: self._client.pause(1))
 
+    @_synchronized
     def next_track(self) -> None:
         self._cmd(lambda: self._client.next())
 
+    @_synchronized
     def prev_track(self) -> None:
         self._cmd(lambda: self._client.previous())
 
+    @_synchronized
     def seek(self, seconds: float) -> None:
         self._cmd(lambda: self._client.seekcur(str(seconds)))
 
+    @_synchronized
     def set_volume(self, volume: int) -> None:
         self._cmd(lambda: self._client.setvol(max(0, min(100, volume))))
 
+    @_synchronized
     def toggle_shuffle(self) -> None:
         if not self._ensure():
             return
@@ -213,10 +242,12 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    @_synchronized
     def set_shuffle(self, on: bool) -> None:
         """Set MPD random mode explicitly (album screen Play/Shuffle)."""
         self._cmd(lambda: self._client.random(1 if on else 0))
 
+    @_synchronized
     def toggle_repeat(self) -> None:
         if not self._ensure():
             return
@@ -226,6 +257,7 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    @_synchronized
     def db_update(self) -> None:
         """Tell MPD to rescan its music directory."""
         if not self._ensure():
@@ -238,6 +270,7 @@ class MusiMPDClient:
 
     # ── queue management ──────────────────────────────────────────────────────
 
+    @_synchronized
     def play_paths(self, paths: list[Path | str], start_index: int = 0) -> None:
         """Replace the MPD queue with the given absolute paths and start playing."""
         if not self._ensure():
@@ -252,6 +285,7 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    @_synchronized
     def queue(self) -> list["QueueItem"]:
         """Return the current play queue (the up-next list)."""
         if not self._ensure():
@@ -270,10 +304,12 @@ class MusiMPDClient:
             for s in songs
         ]
 
+    @_synchronized
     def play_pos(self, pos: int) -> None:
         """Jump to and play the track at queue position ``pos``."""
         self._cmd(lambda: self._client.play(pos))
 
+    @_synchronized
     def queue_next(self, paths: list[Path | str]) -> None:
         """Insert tracks right after the currently playing one."""
         if not self._ensure():
@@ -285,6 +321,7 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    @_synchronized
     def queue_add(self, paths: list[Path | str]) -> None:
         """Append tracks to the end of the queue."""
         if not self._ensure():
@@ -295,10 +332,12 @@ class MusiMPDClient:
         except Exception:
             self._connected = False
 
+    @_synchronized
     def remove_pos(self, pos: int) -> None:
         """Remove the track at queue position ``pos``."""
         self._cmd(lambda: self._client.delete(pos))
 
+    @_synchronized
     def move(self, from_pos: int, to_pos: int) -> None:
         """Reorder: move a queued track from one position to another."""
         if from_pos == to_pos:
@@ -307,6 +346,7 @@ class MusiMPDClient:
 
     # ── play history ──────────────────────────────────────────────────────────
 
+    @_synchronized
     def record_play(self, db_conn: sqlite3.Connection, abs_path: str) -> None:
         """Write a play_history row for the given track path."""
         try:
@@ -331,6 +371,7 @@ class MusiMPDClient:
         except ValueError:
             return str(path).replace("\\", "/")
 
+    @_synchronized
     def _cmd(self, fn) -> None:
         if not self._ensure():
             return
