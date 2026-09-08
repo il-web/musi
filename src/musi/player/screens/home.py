@@ -220,7 +220,7 @@ class HomeScreen(Screen):
         unreachable under the host and wrong if Home is ever drawn standalone.
         """
         if y < 26:
-            return Button.BACK
+            return Button.HOME
         return None
 
     def on_press(self, x: int, y: int) -> bool:

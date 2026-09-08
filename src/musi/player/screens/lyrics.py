@@ -289,7 +289,7 @@ class LyricsScreen(Screen):
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
-            return Button.BACK
+            return Button.HOME
 
         r = self.result
         if not self.loading and (r is None or not r.found):

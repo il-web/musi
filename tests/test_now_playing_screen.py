@@ -96,10 +96,10 @@ def test_tapping_the_art_toggles_play():
     assert s.handle_touch(160, 150) == Button.PLAY_PAUSE
 
 
-def test_status_bar_tap_still_goes_back():
+def test_status_bar_tap_goes_home():
     from musi.player.input import Button
     s = NowPlayingScreen(FakeApp())
-    assert s.handle_touch(160, 10) == Button.BACK
+    assert s.handle_touch(160, 10) == Button.HOME
 
 
 def test_it_draws_without_art():

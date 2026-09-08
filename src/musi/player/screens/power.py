@@ -129,7 +129,7 @@ class PowerScreen(Screen):
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
-            return Button.BACK
+            return Button.HOME
         if self._pending is None:
             if SHUTDOWN_RECT.collidepoint(x, y):
                 self._pending = "shutdown"

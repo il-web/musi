@@ -126,12 +126,19 @@ class WifiScreen(ListScreen):
             if y >= KB_TOP:                       # tap on the on-screen keyboard
                 self._on_key(self._kb.key_at(x, y))
                 return None
-            if y < 26:                            # status bar = cancel
-                self._state = _S_LIST
+            if y < 26:                            # status bar = home
+                return Button.HOME
             return None
         if self._state in (_S_DONE, _S_ERROR, _S_UNSUPPORTED):
             return Button.BACK                    # tap anywhere to dismiss
         return super().handle_touch(x, y)
+
+    def go_back(self) -> None:
+        """Swipe backs out of password entry first, then off the screen."""
+        if self._state == _S_PASSWORD:
+            self._state = _S_LIST
+            return
+        super().go_back()
 
     def handle_scroll(self, dy: float) -> None:
         if self._state == _S_LIST:

@@ -168,13 +168,13 @@ def test_draw_does_no_sql_after_the_first_frame(tmp_path):
     assert app.db.queries == 0
 
 
-def test_status_bar_tap_returns_back(tmp_path):
-    """Home paints the ‹ chevron under the host (stack deeper than one), so a
-    status-bar tap must resolve to BACK — Library and Search already do."""
+def test_status_bar_tap_returns_home(tmp_path):
+    """Home paints the house glyph under the host (stack deeper than one), so a
+    status-bar tap must resolve to HOME — going back one step is the swipe."""
     from musi.player.input import Button
     s = HomeScreen(FakeApp(_library(tmp_path, with_history=True)))
     s.on_enter()
-    assert s.handle_touch(50, 10) is Button.BACK
+    assert s.handle_touch(50, 10) is Button.HOME
 
 
 def test_content_area_tap_is_ignored(tmp_path):

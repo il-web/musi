@@ -101,6 +101,18 @@ class App:
         while len(self._stack) > 1:
             self.pop()
 
+    def _dispatch_button(self, scr: Screen, btn: Button) -> None:
+        """Send a resolved button to the screen — except HOME, which is ours.
+
+        Most screens override handle() without delegating upward, so a HOME
+        left to them would be silently discarded. Catching it here means no
+        screen can swallow it, including ones written later.
+        """
+        if btn is Button.HOME:
+            self.go_home()
+        else:
+            scr.handle(btn, self._status)
+
     def quit(self) -> None:
         self._running = False
 
@@ -247,7 +259,7 @@ class App:
                     if not consumed:
                         btn = key_to_button(event.key)
                         if btn and self._stack:
-                            self._stack[-1].handle(btn, self._status)
+                            self._dispatch_button(self._stack[-1], btn)
                 # Touch and mouse share one gesture flow: press → move → release.
                 # KMSDRM delivers touches as finger events; the desktop window
                 # sends mouse events. A screen may grab the gesture as a drag
@@ -409,7 +421,7 @@ class App:
                 if self._touch_moved < TAP_SLOP_PX and not self._long_fired:
                     btn = scr.handle_touch(*self._touch_start)
                     if btn is not None:
-                        scr.handle(btn, self._status)
+                        self._dispatch_button(scr, btn)
         self._touch_start = None
         self._captured    = False
         self._edge_live   = False

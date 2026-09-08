@@ -78,7 +78,7 @@ class SearchScreen(ListScreen):
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
-            return Button.BACK
+            return Button.HOME
         if y >= KB_TOP:                       # tap on the on-screen keyboard
             self._on_key(self._kb.key_at(x, y))
             return None

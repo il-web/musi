@@ -153,7 +153,7 @@ class NowPlayingScreen(Screen):
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
-            return Button.BACK
+            return Button.HOME
         # transport row
         if CTRL_Y - 22 <= y <= CTRL_Y + 22:
             if x < 120:

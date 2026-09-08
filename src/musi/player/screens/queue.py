@@ -102,7 +102,7 @@ class QueueScreen(ListScreen):
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
-            return Button.BACK
+            return Button.HOME
         if LIST_Y <= y < NAV_Y and not self._tap.pending:
             di = self._klist.index_at(y - LIST_Y)
             if 0 <= di < len(self._items):

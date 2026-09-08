@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pygame
 
+from musi.player import statusbar
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 
@@ -48,18 +49,12 @@ class Screen(ABC):
     def handle_touch(self, x: int, y: int) -> "Button | None":
         """Map a touch tap to a Button. Return None to ignore the tap.
 
-        Default: status-bar tap = BACK; bottom strip split into BACK / SELECT / PLAY_PAUSE.
-        Screens with list items should override this for direct-tap navigation.
+        Default: a status-bar tap returns to the launcher. Going back one step
+        is the left-edge swipe, resolved centrally in app.py. Screens with list
+        items should override this for direct-tap navigation.
         """
-        if y < 26:
-            return Button.BACK
-        if y > 430:
-            if x < 80:
-                return Button.BACK
-            elif x < 240:
-                return Button.SELECT
-            else:
-                return Button.PLAY_PAUSE
+        if y < statusbar.BAR_H:
+            return Button.HOME
         return None
 
     def handle_scroll(self, dy: float) -> None:

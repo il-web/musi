@@ -96,3 +96,94 @@ def test_home_button_routes_to_go_home(tmp_path):
 def test_home_is_mapped_for_dev_keyboard():
     from musi.player.input import key_to_button
     assert key_to_button(pygame.K_h) is Button.HOME
+
+
+def test_base_status_bar_tap_is_home(tmp_path):
+    a = _app(tmp_path, 2)
+    assert Screen.handle_touch(a.stack[-1], 160, 10) is Button.HOME
+
+
+def test_the_dead_bottom_strip_is_gone(tmp_path):
+    """y>430 mapped to BACK/SELECT/PLAY_PAUSE before the dock moved controls
+    to y=406. No live screen reached it; it must not linger as a second,
+    invisible back affordance."""
+    a = _app(tmp_path, 2)
+    for x in (40, 160, 280):
+        assert Screen.handle_touch(a.stack[-1], x, 450) is None
+
+
+def test_wifi_swipe_leaves_password_entry_without_popping(tmp_path):
+    """A stray edge swipe must not throw away a typed password."""
+    from musi.player.screens import wifi
+    a = App(mpd=None, db=None, art_dir=tmp_path, lyrics_dir=tmp_path)
+    a.push(Probe(a, "root"))
+    w = wifi.WifiScreen(a)
+    a.stack.append(w)   # not push(): on_enter spawns a real network scan
+    w._state = wifi._S_PASSWORD
+    w.go_back()
+    assert w._state == wifi._S_LIST
+    assert len(a.stack) == 2
+
+
+def test_wifi_swipe_from_the_list_pops(tmp_path):
+    from musi.player.screens import wifi
+    a = App(mpd=None, db=None, art_dir=tmp_path, lyrics_dir=tmp_path)
+    a.push(Probe(a, "root"))
+    w = wifi.WifiScreen(a)
+    a.stack.append(w)   # not push(): on_enter spawns a real network scan
+    w._state = wifi._S_LIST
+    w.go_back()
+    assert len(a.stack) == 1
+
+
+def test_wifi_status_bar_tap_is_home_during_password_entry(tmp_path):
+    """Home means Home everywhere — no screen keeps a private meaning for it."""
+    from musi.player.screens import wifi
+    a = App(mpd=None, db=None, art_dir=tmp_path, lyrics_dir=tmp_path)
+    a.push(Probe(a, "root"))
+    w = wifi.WifiScreen(a)
+    a.stack.append(w)   # not push(): on_enter spawns a real network scan
+    w._state = wifi._S_PASSWORD
+    assert w.handle_touch(160, 10) is Button.HOME
+
+
+class Swallower(Probe):
+    """Mimics the 14 screens that override handle() without delegating upward."""
+
+    def handle(self, button, status):
+        pass
+
+    def handle_touch(self, x, y):
+        return Button.HOME
+
+
+def test_home_survives_a_screen_that_swallows_every_button(tmp_path):
+    """HOME is intercepted centrally, so no screen can discard it — including
+    screens written later that forget to delegate to super()."""
+    a = App(mpd=None, db=None, art_dir=tmp_path, lyrics_dir=tmp_path)
+    a.push(Probe(a, "root"))
+    a.push(Swallower(a, "deep"))
+    a._dispatch_button(a.stack[-1], Button.HOME)
+    assert len(a.stack) == 1
+
+
+def test_a_status_bar_tap_reaches_home_through_the_touch_path(tmp_path):
+    """End to end: the tap resolves to HOME and actually lands on the launcher."""
+    a = App(mpd=None, db=None, art_dir=tmp_path, lyrics_dir=tmp_path)
+    a.push(Probe(a, "root"))
+    a.push(Swallower(a, "deep"))
+    a._begin_touch(160, 10, 0.0)
+    a._end_touch(160, 10)
+    assert len(a.stack) == 1
+
+
+def test_other_buttons_still_reach_the_screen(tmp_path):
+    """Only HOME is intercepted; everything else keeps going to the screen."""
+    a = App(mpd=None, db=None, art_dir=tmp_path, lyrics_dir=tmp_path)
+    a.push(Probe(a, "root"))
+    seen = []
+    top = Probe(a, "top")
+    top.handle = lambda b, s: seen.append(b)
+    a.push(top)
+    a._dispatch_button(top, Button.SELECT)
+    assert seen == [Button.SELECT]

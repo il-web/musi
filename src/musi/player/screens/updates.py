@@ -206,7 +206,7 @@ class UpdatesScreen(Screen):
         if self._updating:
             return None        # modal — block input during update
         if y < 26:
-            return Button.BACK
+            return Button.HOME
         if CHECK_RECT.collidepoint(x, y):
             self._check()
         elif UPDATE_RECT.collidepoint(x, y):
