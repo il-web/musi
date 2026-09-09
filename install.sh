@@ -225,7 +225,41 @@ EOF
 # mpris-proxy only forwards AVRCP onto MPRIS — something has to be listening
 # there or the button presses go nowhere. mpdris2 is that listener; without
 # this unit the whole chain is one link short and the headphones do nothing.
-MPDRIS2_BIN="$(command -v mpDris2 || command -v mpdris2 || echo /usr/bin/mpDris2)"
+#
+# We run a patched copy, not /usr/bin/mpDris2. Debian's 0.9.1 reconnects without
+# disconnecting first, so python-mpd2 raises "Already connected" and it never
+# recovers; combined with the 5 s socket timeout it sets, our own startup
+# db_update() wedges it on essentially every boot. Patching a copy in $HOME
+# keeps this out of root's way and survives apt upgrade. Mirrors update.sh's
+# step 7 — keep the two in step.
+MPDRIS2_SRC="$(command -v mpDris2 || command -v mpdris2 || echo /usr/bin/mpDris2)"
+case "$MPDRIS2_SRC" in ""|"$HOME"/*) MPDRIS2_SRC=/usr/bin/mpDris2 ;; esac
+MPDRIS2_BIN="$HOME/.local/bin/mpDris2"
+if [ -r "$MPDRIS2_SRC" ]; then
+    mkdir -p "$HOME/.local/bin"
+    cp "$MPDRIS2_SRC" "$MPDRIS2_BIN"
+    chmod 0755 "$MPDRIS2_BIN"
+    python3 - "$MPDRIS2_BIN" <<'PYFIX'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+call = "            self.client.connect(self._params['host'], self._params['port'])"
+marker = "musi: clear a stale socket first"
+fix = (
+    "            try:                      # " + marker + "\n"
+    "                self.client.disconnect()\n"
+    "            except Exception:\n"
+    "                pass\n"
+)
+if marker not in s and call in s:
+    p.write_text(s.replace(call, fix + call, 1))
+    print("  mpDris2 reconnect patched")
+PYFIX
+else
+    MPDRIS2_BIN="$MPDRIS2_SRC"
+fi
 cat > "$HOME/.config/systemd/user/mpdris2.service" <<EOF
 [Unit]
 Description=MPRIS interface for MPD (headphone media buttons)

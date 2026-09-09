@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=6
+LATEST_STEP=7
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -119,6 +119,76 @@ WantedBy=default.target
 UNIT
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable --now mpdris2 2>/dev/null || true
+    systemctl --user restart mpris-proxy 2>/dev/null || true
+}
+
+# ── step 7: patch mpdris2's reconnect (2026-09-09) ────────────────────────────
+# Debian's mpDris2 0.9.1 calls client.connect() without disconnecting first, so
+# python-mpd2 raises "Already connected" and it never recovers — the same bug
+# this repo fixed in its own client on the same day. mpDris2 also sets a 5 s
+# socket timeout to notice dropped connections, and our own startup
+# db_update() stalls MPD for longer than that, so the wedge happens on
+# essentially every boot: the headphone buttons are dead from the start rather
+# than failing occasionally.
+#
+# Patch a copy in the user's own bin, not /usr/bin. That keeps this a user step
+# so it ships over OTA with no SSH, and apt upgrade cannot silently revert it
+# and kill the buttons again with no obvious cause. Re-copied from the
+# installed package every run and patched only while the bug is still present,
+# so a fixed package upstream supersedes this instead of being pinned out.
+user_7() {
+    src="$(command -v mpDris2 || command -v mpdris2 || true)"
+    # After the first run our own copy is on PATH — always track the package.
+    case "$src" in ""|"$HOME"/*) src=/usr/bin/mpDris2 ;; esac
+    if [ ! -r "$src" ]; then
+        say "mpdris2 not installed — headphone buttons stay inert."
+        say "run once over SSH:  sudo apt-get install -y mpdris2 && bash update.sh"
+        return 0
+    fi
+
+    dst="$HOME/.local/bin/mpDris2"
+    mkdir -p "$HOME/.local/bin"
+    cp "$src" "$dst"
+    chmod 0755 "$dst"
+
+    python3 - "$dst" <<'PYFIX'
+import pathlib
+import sys
+
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+call = "            self.client.connect(self._params['host'], self._params['port'])"
+marker = "musi: clear a stale socket first"
+fix = (
+    "            try:                      # " + marker + "\n"
+    "                self.client.disconnect()\n"
+    "            except Exception:\n"
+    "                pass\n"
+)
+if marker in s:
+    print("[update] mpDris2 copy already patched")
+elif call in s:
+    p.write_text(s.replace(call, fix + call, 1))
+    print("[update] mpDris2 reconnect patched")
+else:
+    print("[update] mpDris2 connect() not found — package may already be fixed")
+PYFIX
+
+    cat > "$HOME/.config/systemd/user/mpdris2.service" <<UNIT
+[Unit]
+Description=MPRIS interface for MPD (headphone media buttons)
+After=mpd.service
+Wants=mpd.service
+[Service]
+ExecStart=$dst
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable --now mpdris2 2>/dev/null || true
+    systemctl --user restart mpdris2 2>/dev/null || true
     systemctl --user restart mpris-proxy 2>/dev/null || true
 }
 
