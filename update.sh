@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=5
+LATEST_STEP=6
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -85,6 +85,41 @@ user_4() {
     rm -f "$HOME"/.cache/musi-uploads/tmp* 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user restart musi-api 2>/dev/null || true
+}
+
+# ── step 6: headphone media buttons (2026-09-09) ──────────────────────────────
+# The AVRCP chain was one link short. install.sh has installed the mpdris2
+# package since the BT pack, and enabled mpris-proxy to bridge the headphone's
+# AVRCP key presses onto MPRIS — but nothing ever created or started the
+# mpdris2 unit, so there was no MPRIS player on the bus to receive them. The
+# presses arrived and went nowhere.
+#
+# User-only step on purpose: the package is already installed, so this just
+# writes a unit and starts it, and reaches existing devices over OTA with no
+# manual install.sh. If the binary is missing (a device installed before the
+# package was added), say so rather than enabling a unit that cannot start.
+user_6() {
+    bin="$(command -v mpDris2 || command -v mpdris2 || true)"
+    if [ -z "$bin" ]; then
+        say "mpdris2 not installed — headphone buttons stay inert."
+        say "run once over SSH:  sudo apt-get install -y mpdris2 && bash update.sh"
+        return 0
+    fi
+    cat > "$HOME/.config/systemd/user/mpdris2.service" <<UNIT
+[Unit]
+Description=MPRIS interface for MPD (headphone media buttons)
+After=mpd.service
+Wants=mpd.service
+[Service]
+ExecStart=$bin
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+UNIT
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable --now mpdris2 2>/dev/null || true
+    systemctl --user restart mpris-proxy 2>/dev/null || true
 }
 
 # ── step 5: power pack — LEDs + HDMI off (2026-08-26) ────────────────────────

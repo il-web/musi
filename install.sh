@@ -222,6 +222,23 @@ RestartSec=3
 WantedBy=default.target
 EOF
 
+# mpris-proxy only forwards AVRCP onto MPRIS — something has to be listening
+# there or the button presses go nowhere. mpdris2 is that listener; without
+# this unit the whole chain is one link short and the headphones do nothing.
+MPDRIS2_BIN="$(command -v mpDris2 || command -v mpdris2 || echo /usr/bin/mpDris2)"
+cat > "$HOME/.config/systemd/user/mpdris2.service" <<EOF
+[Unit]
+Description=MPRIS interface for MPD (headphone media buttons)
+After=mpd.service
+Wants=mpd.service
+[Service]
+ExecStart=$MPDRIS2_BIN
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=default.target
+EOF
+
 # ── 9. boot splash (Plymouth) ─────────────────────────────────────────────────
 say "Boot splash"
 sudo mkdir -p /usr/share/plymouth/themes/musi
@@ -371,7 +388,7 @@ install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/mus
 install -m 0644 "$SCRIPT_DIR/pi/musi-api.service" "$HOME/.config/systemd/user/musi-api.service"
 loginctl enable-linger "$USER_NAME" 2>/dev/null || true
 systemctl --user daemon-reload
-systemctl --user enable mpd musi-bt-router mpris-proxy musi-ui musi-api 2>/dev/null || true
+systemctl --user enable mpd musi-bt-router mpris-proxy mpdris2 musi-ui musi-api 2>/dev/null || true
 sudo hostnamectl set-hostname musi 2>/dev/null || true
 sudo systemctl enable --now avahi-daemon 2>/dev/null || true
 
