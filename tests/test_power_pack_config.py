@@ -139,5 +139,19 @@ def test_install_sh_mirrors_the_same_lines() -> None:
     assert HDMI_OFF in install, "install.sh does not mirror the HDMI disable"
 
 
-def test_latest_step_is_five() -> None:
-    assert "LATEST_STEP=5" in UPDATE_SH.read_text(encoding="utf-8")
+def test_the_power_pack_stays_step_five() -> None:
+    """Pin this pack's own number, not the newest one.
+
+    Step numbers are immutable once devices have recorded them — a device at
+    level 5 must never be handed a different step 5 later. LATEST_STEP only
+    has to be at least 5 or this step never runs; it rises with every pack
+    added after it, so asserting equality made every future pack fail here.
+    """
+    import re
+
+    text = UPDATE_SH.read_text(encoding="utf-8")
+    assert "root_5()" in text, "the power pack is no longer step 5"
+
+    m = re.search(r"^LATEST_STEP=(\d+)", text, re.M)
+    assert m, "update.sh has no LATEST_STEP"
+    assert int(m.group(1)) >= 5, "LATEST_STEP is below the power pack's step"
