@@ -248,6 +248,16 @@ class MusiMPDClient:
         self._cmd(lambda: self._client.random(1 if on else 0))
 
     @_synchronized
+    def set_crossfade(self, seconds: int) -> None:
+        """Blend consecutive tracks over ``seconds``. Zero disables it.
+
+        MPD keeps this in its own state file, so it survives a restart of the
+        daemon but not a change made while the daemon was down — which is why
+        the UI re-applies the stored preference on startup.
+        """
+        self._cmd(lambda: self._client.crossfade(int(seconds)))
+
+    @_synchronized
     def toggle_repeat(self) -> None:
         if not self._ensure():
             return

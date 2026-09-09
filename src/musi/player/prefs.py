@@ -14,6 +14,9 @@ from musi.library import config
 
 DEFAULTS: dict[str, object] = {
     "wallpaper": "none",
+    # Off by default: crossfade eats the start and end of every track, which is
+    # wrong for anything with a deliberate intro or outro.
+    "crossfade": False,
 }
 
 _cache: dict[str, object] | None = None

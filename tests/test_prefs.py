@@ -50,8 +50,12 @@ def test_corrupt_file_is_repaired_on_next_write():
     config.prefs_path().write_text("{not json at all", encoding="utf-8")
     prefs.reload()
     prefs.set("wallpaper", "cool")
-    assert json.loads(config.prefs_path().read_text(encoding="utf-8")) == {
-        "wallpaper": "cool"}
+    # The written file carries every default, not just the key that was set,
+    # so assert on the repair and the value rather than the exact key set —
+    # otherwise adding a default breaks this test.
+    written = json.loads(config.prefs_path().read_text(encoding="utf-8"))
+    assert isinstance(written, dict)
+    assert written["wallpaper"] == "cool"
 
 
 def test_a_non_dict_json_file_is_ignored():

@@ -195,9 +195,26 @@ class LoadingScreen(Screen):
         self._message  = "Updating MPD database…"
         self._detail   = ""
         self._progress = 0.88
+        self._apply_prefs()
         self.app.mpd.db_update()
         time.sleep(0.4)
         self._progress = 0.95
+
+    def _apply_prefs(self) -> None:
+        """Push stored playback preferences into MPD.
+
+        MPD keeps crossfade in its own state file, so a preference changed
+        while the daemon was down would otherwise disagree with what the
+        Playback screen shows. Best-effort: a failure here must not stop boot.
+        """
+        from musi.player import prefs
+        from musi.player.screens.playback import CROSSFADE_S
+        try:
+            on = bool(prefs.get("crossfade"))
+            self.app.mpd.set_crossfade(CROSSFADE_S if on else 0)
+        except Exception:
+            import logging
+            logging.warning("could not apply playback prefs", exc_info=True)
 
     # ── transition ────────────────────────────────────────────────────────────
 
