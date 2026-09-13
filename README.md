@@ -1,27 +1,47 @@
-# musi OS · beta
+<h1 align="center">musi OS</h1>
 
-A tiny, touch-first music player operating system for the Raspberry Pi. Point it
-at a small screen and an audio output and you get a self-contained pocket music
-player: album-art UI, your own local library, wired **and** Bluetooth audio with
-automatic switching, on-device pairing, a boot splash, and over-the-air updates.
+<p align="center">
+  A tiny, touch-first music player operating system for the Raspberry Pi.
+</p>
+
+<p align="center">
+  <img alt="status" src="https://img.shields.io/badge/status-beta-orange" />
+  <img alt="platform" src="https://img.shields.io/badge/platform-Raspberry%20Pi-c51a4a?logo=raspberrypi&logoColor=white" />
+  <img alt="resolution" src="https://img.shields.io/badge/display-320%C3%97480-555" />
+  <img alt="license" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" />
+</p>
+
+---
+
+Point musi OS at a small screen and an audio output and you get a self-contained
+pocket music player: album-art UI, your own local library, wired **and**
+Bluetooth audio with automatic switching, on-device pairing, a boot splash, and
+over-the-air updates.
 
 > **Status: beta.** Runs a real device end-to-end. The clean-install path is new —
 > reports welcome.
+
+<p align="center">
+  <img src="docs/screenshots/home.png" width="200" alt="Home screen" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/browse.png" width="200" alt="Browse library screen" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/settings.png" width="200" alt="Settings screen" />
+</p>
 
 ---
 
 ## What it does
 
-- **Plays your local library** (MP3 / FLAC / ALAC / OGG / …) through MPD — browse
-  artist → album → track, full-text search, now-playing with album-art backdrop.
-- **Touch-first UI** at 320×480: swipe to scroll, drag to reorder the queue,
-  transport controls, volume slider.
-- **Audio anywhere:** wired I²S **DAC** and/or **Bluetooth** A2DP, with automatic
-  switching and on-device scan/pair/connect.
-- **Headphone media buttons** (play/pause/next/prev) via Bluetooth AVRCP.
-- **Wi-Fi transfer:** drop new music onto the device from any browser.
-- **Appliance boot:** powers straight into the player with a splash — no terminal.
-- **Over-the-air updates:** Settings → Updates → *Update now*.
+| | |
+|---|---|
+| 🎵 **Local library** | MP3 / FLAC / ALAC / OGG / … via MPD — browse artist → album → track, full-text search, now-playing with album-art backdrop |
+| 👆 **Touch-first UI** | 320×480: swipe to scroll, drag to reorder the queue, transport controls, volume slider |
+| 🔊 **Audio anywhere** | Wired I²S **DAC** and/or **Bluetooth** A2DP, with automatic switching and on-device scan/pair/connect |
+| 🎧 **Media buttons** | Play/pause/next/prev from headphones via Bluetooth AVRCP |
+| 📶 **Wi-Fi transfer** | Drop new music onto the device from any browser |
+| 🔌 **Appliance boot** | Powers straight into the player with a splash — no terminal |
+| ⬆️ **OTA updates** | Settings → Updates → *Update now* |
 
 ---
 
@@ -46,7 +66,10 @@ already exposes — it does **not** drive your panel or sound card itself.
 > installing musi OS. The installer assumes a 320×480 framebuffer/DRM display, a
 > touch evdev (optional), and an ALSA output are already present.
 
-### Tested configuration
+<details>
+<summary><strong>Tested configuration</strong> (click to expand)</summary>
+
+<br>
 
 One known-good setup, for reference:
 
@@ -59,6 +82,8 @@ One known-good setup, for reference:
 
 > On a board with HDMI audio present, the ALSA card index is not stable across boots.
 > musi looks the DAC up by card **name**, not index — see `pi/musi-bt-router`.
+
+</details>
 
 ---
 
@@ -107,11 +132,13 @@ repo and restarts.
 
 ## Repository layout
 
-- `src/musi/player/` — the touchscreen app (pygame): screens, MPD client, updater
-- `src/musi/library/` — library scanner and album-art pipeline
-- `src/musi/wifi_transfer/` — browser-based upload server
-- `pi/` — services, MPD config, Bluetooth/DAC audio router, pairing agent,
-  optional boot splash
+```
+src/musi/player/         the touchscreen app (pygame): screens, MPD client, updater
+src/musi/library/        library scanner and album-art pipeline
+src/musi/wifi_transfer/  browser-based upload server
+pi/                       services, MPD config, Bluetooth/DAC audio router,
+                          pairing agent, optional boot splash
+```
 
 ---
 
