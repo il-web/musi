@@ -24,9 +24,9 @@ over-the-air updates.
 <p align="center">
   <img src="docs/screenshots/home.png" width="200" alt="Home screen" />
   &nbsp;&nbsp;
-  <img src="docs/screenshots/browse.png" width="200" alt="Browse library screen" />
+  <img src="docs/screenshots/browse.png" width="200" alt="Music app — library grid" />
   &nbsp;&nbsp;
-  <img src="docs/screenshots/settings.png" width="200" alt="Settings screen" />
+  <img src="docs/screenshots/now-playing.png" width="200" alt="Now Playing screen" />
 </p>
 
 ---
