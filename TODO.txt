@@ -148,6 +148,29 @@ DONE
       transport errors are NOT (that would mark songs lyric-less for
       good); "Try again" forces a refetch
 
+[x] Playlists + Favourites pack (plan: docs/superpowers/plans/
+    2026-09-10-playlists.md)
+    - MPD stored playlists (no schema change, no install.sh/update.sh step:
+      install.sh already makes ~/.config/mpd/playlists). mpd_client grows
+      list/tracks/add/remove/move/rename/delete/play/save_queue_as plus
+      is_favorite/toggle_favorite; QueueItem carries an abs path now
+    - Favourites = one reserved stored playlist "Favorites"; a heart in the
+      Now Playing secondary row (row is 5 slots now: fav|shuffle|repeat|
+      lyrics|Queue) toggles the current track, pinned first everywhere
+      playlists are listed
+    - New screens: TextEntryScreen (reusable keyboard prompt),
+      AddToPlaylistScreen (picker + "New playlist…"), PlaylistScreen
+      (Album-style header + Play/Shuffle, tap-to-play, long-press
+      Play/next/queue/Remove, Queue-style drag-handle reorder)
+    - Library: 3rd pill "Playlists" (tap = open; long-press = Play /
+      Rename / Delete-with-confirm). Album + Search track menus gain
+      "Add to Favourites" and "Add to playlist…". Queue gets a Save
+      button (queue -> playlist) + "Add to playlist…" on a row
+    - tests/: test_playlist_screen, test_playlist_picker, test_text_entry,
+      test_queue_screen (new) + mpd_client/now_playing/library additions
+    - DEFERRED to a follow-up: /api/v1/playlists REST CRUD in api/server.py
+      (fits the library-management API remit; device UI shipped first)
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

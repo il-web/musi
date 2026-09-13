@@ -30,7 +30,7 @@ ROW_H  = CELL + TEXT_H + GAP                             # 129
 ARTIST_H = 52
 
 TITLE_Y, PILL_Y, PILL_H = 34, 66, 24
-PILLS = ["Albums", "Artists"]
+PILLS = ["Albums", "Artists", "Playlists"]
 
 
 @dataclass
@@ -70,13 +70,18 @@ class LibraryScreen(ListScreen):
         self._load()
 
     def _load(self) -> None:
-        """All the screen's SQL, once per pill change."""
+        """All the screen's data, once per pill change (SQL, or MPD for playlists)."""
         if self.pill == 0:
             rows = album_queries.all_albums(self.app.db)
             self.items = [_Item(r["title"], str(r["year"] or ""), r["id"],
                                 r["art_path"] or "") for r in rows]
             self.item_h = self._klist.item_h = ROW_H
             self._klist.set_count(math.ceil(len(self.items) / COLS), reset=True)
+        elif self.pill == 2:
+            pls = self.app.mpd.list_playlists()
+            self.items = [_Item(p.name, sub=str(p.track_count)) for p in pls]
+            self.item_h = self._klist.item_h = ARTIST_H
+            self._klist.set_count(len(self.items), reset=True)
         else:
             rows = album_queries.all_artists(self.app.db)
             self.items = [_Item(r["name"], row_id=r["id"]) for r in rows]
@@ -156,15 +161,19 @@ class LibraryScreen(ListScreen):
     def _draw_artist_row(self, surface, y, di) -> None:
         item = self.items[di]
         sel  = (di == self._sel)
+        cy   = y + (ARTIST_H - 3) // 2
         rect = pygame.Rect(MARGIN, y, 320 - MARGIN * 2, ARTIST_H - 3)
         pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
                          rect, border_radius=7)
         lbl = theme.render_cached(item.label, 13, theme.WHITE, bold=sel,
-                                  max_width=250)
+                                  max_width=214 if item.sub else 250)
         surface.blit(lbl, (rect.x + 12,
                            y + (ARTIST_H - 3 - lbl.get_height()) // 2))
-        icons.draw_chevron_right(surface, rect.right - 14,
-                                 y + (ARTIST_H - 3) // 2,
+        if item.sub:                      # playlist track count
+            cnt = theme.render_cached(item.sub, 10,
+                                      theme.WHITE if sel else theme.DIM)
+            surface.blit(cnt, cnt.get_rect(right=rect.right - 26, centery=cy))
+        icons.draw_chevron_right(surface, rect.right - 14, cy,
                                  theme.WHITE if sel else theme.DIM)
 
     # ── input ─────────────────────────────────────────────────────────────────
@@ -200,8 +209,51 @@ class LibraryScreen(ListScreen):
         if self._grid_mode:
             from musi.player.screens.album import AlbumScreen
             self.app.push(AlbumScreen(self.app, item.row_id))
+        elif self.pill == 2:
+            from musi.player.screens.playlist import PlaylistScreen
+            self.app.push(PlaylistScreen(self.app, item.label))
         else:
             self._drill_into_artist(item.row_id, item.label)
+
+    # ── playlist management (long-press on the Playlists pill) ────────────────
+
+    def handle_long_press(self, x: int, y: int) -> bool:
+        if self.pill != 2 or self.artist_id:
+            return False
+        if not (self.list_y <= y < self.nav_y):
+            return False
+        di = self._klist.index_at(y - self.list_y)
+        if not (0 <= di < len(self.items)):
+            return False
+        self._sel = di
+        name = self.items[di].label
+        from musi.player.screens.context_menu import ContextMenuScreen
+        self.app.push(ContextMenuScreen(self.app, name, [
+            ("Play",    lambda: self._play_playlist(name)),
+            ("Rename…", lambda: self._rename_playlist(name)),
+            ("Delete",  lambda: self._confirm_delete(name)),
+        ]))
+        return True
+
+    def _play_playlist(self, name: str) -> None:
+        self.app.mpd.play_playlist(name)
+        self.app.request_poll()
+        from musi.player.screens.now_playing import NowPlayingScreen
+        self.app.push(NowPlayingScreen(self.app))
+
+    def _rename_playlist(self, name: str) -> None:
+        from musi.player.screens.text_entry import TextEntryScreen
+        self.app.push(TextEntryScreen(
+            self.app, "Rename playlist", initial=name,
+            on_commit=lambda new: (self.app.mpd.playlist_rename(name, new),
+                                   self._load())))
+
+    def _confirm_delete(self, name: str) -> None:
+        from musi.player.screens.context_menu import ContextMenuScreen
+        self.app.push(ContextMenuScreen(self.app, f'Delete "{name}"?', [
+            ("Delete", lambda: (self.app.mpd.playlist_delete(name), self._load())),
+            ("Cancel", lambda: None),
+        ]))
 
     # ── artist drill-in (a level inside Library, not a new screen) ─────────────
 

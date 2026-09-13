@@ -8,7 +8,7 @@ import pygame
 from musi.player import art_cache, audio_detect, icons, minibar, statusbar, theme
 from musi.player.input import Button
 from musi.player.list_screen import ListScreen
-from musi.player.mpd_client import PlayerStatus
+from musi.player.mpd_client import FAVORITES, PlayerStatus
 
 ITEM_H = 48
 LIST_Y = 264
@@ -190,11 +190,18 @@ class AlbumScreen(ListScreen):
         t = self._tracks[di]
         from musi.player.screens.context_menu import ContextMenuScreen
         self.app.push(ContextMenuScreen(self.app, t["title"], [
-            ("Play now",     lambda: self._play_from(di)),
-            ("Play next",    lambda: self._queue([t["path"]], next_up=True)),
-            ("Add to queue", lambda: self._queue([t["path"]], next_up=False)),
+            ("Play now",          lambda: self._play_from(di)),
+            ("Play next",         lambda: self._queue([t["path"]], next_up=True)),
+            ("Add to queue",      lambda: self._queue([t["path"]], next_up=False)),
+            ("Add to Favourites", lambda: self.app.mpd.playlist_add(
+                FAVORITES, [t["path"]])),
+            ("Add to playlist…",  lambda: self._add_to_playlist([t["path"]])),
         ]))
         return True
+
+    def _add_to_playlist(self, paths: list[str]) -> None:
+        from musi.player.screens.playlist_picker import AddToPlaylistScreen
+        self.app.push(AddToPlaylistScreen(self.app, paths))
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.UP:

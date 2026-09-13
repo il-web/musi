@@ -62,3 +62,22 @@ def draw_music_note(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> No
     pygame.draw.line(surface, col, (cx, cy + 4), (cx, cy - 10), 2)
     pygame.draw.line(surface, col, (cx, cy - 10), (cx + 8, cy - 14), 2)
     pygame.draw.line(surface, col, (cx + 8, cy - 14), (cx + 8, cy - 4), 2)
+
+
+def draw_heart(surface: pygame.Surface, cx: int, cy: int, col: tuple,
+               filled: bool = False) -> None:
+    """Heart glyph — two lobes over a point. Filled when favourited."""
+    r = 4
+    lobe_l = (cx - r + 1, cy - 3)
+    lobe_r = (cx + r - 1, cy - 3)
+    point  = (cx, cy + 7)
+    body   = [lobe_l, (cx - 2 * r, cy - 1), point, (cx + 2 * r, cy - 1), lobe_r]
+    if filled:
+        pygame.draw.circle(surface, col, lobe_l, r)
+        pygame.draw.circle(surface, col, lobe_r, r)
+        pygame.draw.polygon(surface, col, body)
+    else:
+        pygame.draw.circle(surface, col, lobe_l, r, 2)
+        pygame.draw.circle(surface, col, lobe_r, r, 2)
+        pygame.draw.lines(surface, col, False,
+                          [(cx - 2 * r + 1, cy - 1), point, (cx + 2 * r - 1, cy - 1)], 2)

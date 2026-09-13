@@ -20,6 +20,7 @@ NAV_Y       = 462
 MAX_VIS     = (NAV_Y - LIST_Y) // ITEM_H
 HANDLE_X    = 286            # drag-handle centre
 HANDLE_ZONE = 256            # x >= this → handle (drag); x < this → row body (tap)
+SAVE_RECT   = pygame.Rect(252, 26, 58, 26)   # "Save" queue-as-playlist button
 
 
 class QueueScreen(ListScreen):
@@ -54,6 +55,10 @@ class QueueScreen(ListScreen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_home=len(self.app.stack) > 1)
         surface.blit(self._hdr, (14, 26))
+
+        if self._items:
+            save_s = theme.render("Save", 12, theme.ACCENT, bold=True)
+            surface.blit(save_s, save_s.get_rect(center=SAVE_RECT.center))
 
         if not self._items:
             msg = theme.render("Queue is empty", 13, theme.DIM)
@@ -103,6 +108,11 @@ class QueueScreen(ListScreen):
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
             return Button.HOME
+        if self._items and SAVE_RECT.collidepoint(x, y):
+            from musi.player.screens.text_entry import TextEntryScreen
+            self.app.push(TextEntryScreen(self.app, "Save queue as",
+                                          on_commit=self.app.mpd.save_queue_as))
+            return None
         if LIST_Y <= y < NAV_Y and not self._tap.pending:
             di = self._klist.index_at(y - LIST_Y)
             if 0 <= di < len(self._items):
@@ -119,11 +129,19 @@ class QueueScreen(ListScreen):
             return False
         item = self._items[di]
         from musi.player.screens.context_menu import ContextMenuScreen
-        self.app.push(ContextMenuScreen(self.app, item.title, [
+        opts = [
             ("Play",              lambda: self._menu_play(item.pos)),
             ("Remove from queue", lambda: self._menu_remove(item.pos)),
-        ]))
+        ]
+        if item.path:
+            opts.append(("Add to playlist…",
+                         lambda: self._add_to_playlist([item.path])))
+        self.app.push(ContextMenuScreen(self.app, item.title, opts))
         return True
+
+    def _add_to_playlist(self, paths: list[str]) -> None:
+        from musi.player.screens.playlist_picker import AddToPlaylistScreen
+        self.app.push(AddToPlaylistScreen(self.app, paths))
 
     def _menu_play(self, pos: int) -> None:
         self.app.mpd.play_pos(pos)

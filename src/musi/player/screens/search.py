@@ -10,7 +10,7 @@ import pygame
 from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.keyboard import Keyboard
-from musi.player.mpd_client import PlayerStatus
+from musi.player.mpd_client import FAVORITES, PlayerStatus
 from musi.player.list_screen import ListScreen
 from musi.player.widgets import draw_scrollbar
 
@@ -99,11 +99,18 @@ class SearchScreen(ListScreen):
         res = self._results[di]
         from musi.player.screens.context_menu import ContextMenuScreen
         self.app.push(ContextMenuScreen(self.app, res.title, [
-            ("Play now",     self._play_selected),
-            ("Play next",    lambda: self._queue(res.path, next_up=True)),
-            ("Add to queue", lambda: self._queue(res.path, next_up=False)),
+            ("Play now",          self._play_selected),
+            ("Play next",         lambda: self._queue(res.path, next_up=True)),
+            ("Add to queue",      lambda: self._queue(res.path, next_up=False)),
+            ("Add to Favourites", lambda: self.app.mpd.playlist_add(
+                FAVORITES, [res.path])),
+            ("Add to playlist…",  lambda: self._add_to_playlist([res.path])),
         ]))
         return True
+
+    def _add_to_playlist(self, paths: list[str]) -> None:
+        from musi.player.screens.playlist_picker import AddToPlaylistScreen
+        self.app.push(AddToPlaylistScreen(self.app, paths))
 
     def _queue(self, path: str, next_up: bool) -> None:
         if next_up:

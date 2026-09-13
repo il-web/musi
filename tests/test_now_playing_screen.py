@@ -26,6 +26,26 @@ class FakeStatus:
     repeat = False
 
 
+class FakeMPD:
+    def __init__(self):
+        self.calls = []
+        self.favorite = False
+
+    def is_favorite(self, path):
+        return self.favorite
+
+    def toggle_favorite(self, path):
+        self.calls.append(("toggle_favorite", path))
+        self.favorite = not self.favorite
+        return self.favorite
+
+    def toggle_shuffle(self):
+        self.calls.append(("toggle_shuffle",))
+
+    def toggle_repeat(self):
+        self.calls.append(("toggle_repeat",))
+
+
 class FakeApp:
     db = None
     lyrics_dir = None
@@ -33,6 +53,7 @@ class FakeApp:
     def __init__(self):
         self.stack = []
         self.status = FakeStatus()
+        self.mpd = FakeMPD()
 
     def push(self, s):
         self.stack.append(s)
@@ -70,7 +91,7 @@ def test_the_lyrics_button_is_still_there():
     """The redesign must not quietly drop lyrics — it has its own screen."""
     app = FakeApp()
     s = NowPlayingScreen(app)
-    s.handle_touch(180, now_playing.SEC_Y)
+    s.handle_touch(170, now_playing.SEC_Y)
     assert app.stack, "tapping lyrics should push LyricsScreen"
     assert type(app.stack[-1]).__name__ == "LyricsScreen"
 
@@ -79,7 +100,7 @@ def test_lyrics_does_nothing_without_a_track():
     app = FakeApp()
     app.status.path = ""
     s = NowPlayingScreen(app)
-    s.handle_touch(180, now_playing.SEC_Y)
+    s.handle_touch(170, now_playing.SEC_Y)
     assert app.stack == []
 
 
@@ -107,3 +128,48 @@ def test_it_draws_without_art():
     surface = pygame.Surface((320, 480))
     s.draw(surface, FakeStatus())
     assert surface.get_at((160, 20))[:3] != (255, 255, 255)
+
+
+# ── favourite heart (secondary row) ─────────────────────────────────────────
+
+def test_five_secondary_zones_map_to_the_right_action():
+    """fav | shuffle | repeat | lyrics | queue across the SEC_Y row."""
+    app = FakeApp()
+    s = NowPlayingScreen(app)
+    y = now_playing.SEC_Y
+
+    s.handle_touch(30, y)                        # favourite
+    assert app.mpd.calls[-1][0] == "toggle_favorite"
+    s.handle_touch(76, y)                        # shuffle
+    assert app.mpd.calls[-1] == ("toggle_shuffle",)
+    s.handle_touch(118, y)                       # repeat
+    assert app.mpd.calls[-1] == ("toggle_repeat",)
+    s.handle_touch(160, y)                       # lyrics
+    assert type(app.stack[-1]).__name__ == "LyricsScreen"
+    s.handle_touch(250, y)                       # queue
+    assert type(app.stack[-1]).__name__ == "QueueScreen"
+
+
+def test_tapping_the_heart_toggles_and_tracks_state():
+    app = FakeApp()
+    s = NowPlayingScreen(app)
+    assert s._fav is False
+    s.handle_touch(30, now_playing.SEC_Y)
+    assert app.mpd.calls == [("toggle_favorite", "/m/1.mp3")]
+    assert s._fav is True
+
+
+def test_heart_is_inert_without_a_track():
+    app = FakeApp()
+    app.status.path = ""
+    s = NowPlayingScreen(app)
+    s.handle_touch(30, now_playing.SEC_Y)
+    assert app.mpd.calls == []
+
+
+def test_heart_state_follows_the_track():
+    app = FakeApp()
+    app.mpd.favorite = True
+    s = NowPlayingScreen(app)
+    s.draw(pygame.Surface((320, 480)), FakeStatus())
+    assert s._fav is True

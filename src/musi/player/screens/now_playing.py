@@ -55,6 +55,10 @@ class NowPlayingScreen(Screen):
         self._shuffle_cache: bool | None = None
         self._repeat_cache:  bool | None = None
 
+        # favourite state for the current track (a heart in the secondary row)
+        self._fav:      bool = False
+        self._fav_path: str | None = "UNSET"
+
         self._prev_title:   str = ""
         self._prev_meta:    str = ""
         self._prev_elapsed: int = -1   # whole seconds
@@ -77,6 +81,7 @@ class NowPlayingScreen(Screen):
             self._queue_lbl = theme.render("Queue", 10, theme.WHITE)
 
         self._reload_art(status)
+        self._reload_fav(status)
         self._update_text_cache(status)
 
         # 1 — art bleeding from the top edge, dissolving into the panel
@@ -136,14 +141,16 @@ class NowPlayingScreen(Screen):
             icons.draw_play(surface, 160, CTRL_Y, self._accent, size="lg")
         _draw_next(surface, 244, CTRL_Y, theme.WHITE)
 
-        # 9 — shuffle / repeat toggles + queue button
+        # 9 — favourite / shuffle / repeat / lyrics toggles + queue button
         off = (150, 150, 165)
-        _draw_shuffle(surface, 56,  SEC_Y, self._accent if status.shuffle else off)
-        _draw_repeat(surface,  120, SEC_Y, self._accent if status.repeat  else off)
-        _draw_lyrics_icon(surface, 180, SEC_Y,
+        icons.draw_heart(surface, 34, SEC_Y,
+                         self._accent if self._fav else off, filled=self._fav)
+        _draw_shuffle(surface, 76,  SEC_Y, self._accent if status.shuffle else off)
+        _draw_repeat(surface,  118, SEC_Y, self._accent if status.repeat  else off)
+        _draw_lyrics_icon(surface, 160, SEC_Y,
                           theme.WHITE if status.path else off)
-        _draw_list_icon(surface, 232, SEC_Y, theme.WHITE)
-        surface.blit(self._queue_lbl, self._queue_lbl.get_rect(midleft=(246, SEC_Y)))
+        _draw_list_icon(surface, 202, SEC_Y, theme.WHITE)
+        surface.blit(self._queue_lbl, self._queue_lbl.get_rect(midleft=(214, SEC_Y)))
 
         # 10 — volume slider
         vol = self._drag_vol if self._drag_vol is not None else status.volume
@@ -162,15 +169,17 @@ class NowPlayingScreen(Screen):
                 return Button.PLAY_PAUSE
             else:
                 return Button.NEXT
-        # secondary row: shuffle | repeat | lyrics | queue
+        # secondary row: favourite | shuffle | repeat | lyrics | queue
         if SEC_Y - 18 <= y <= SEC_Y + 18:
-            if x < 90:
+            if x < 55:
+                self._toggle_favorite()
+            elif x < 97:
                 self.app.mpd.toggle_shuffle()
                 self.app.request_poll()
-            elif x < 160:
+            elif x < 139:
                 self.app.mpd.toggle_repeat()
                 self.app.request_poll()
-            elif x < 206:
+            elif x < 181:
                 self._open_lyrics()
             else:
                 self._open_queue()
@@ -222,6 +231,14 @@ class NowPlayingScreen(Screen):
         from musi.player.screens.queue import QueueScreen
         self.app.push(QueueScreen(self.app))
 
+    def _toggle_favorite(self) -> None:
+        """Add/remove the current track in the Favourites playlist."""
+        path = self.app.status.path
+        if not path:
+            return
+        self._fav = self.app.mpd.toggle_favorite(path)
+        self._fav_path = path
+
     def _open_lyrics(self) -> None:
         """Lyrics for whatever is playing right now — nothing without a track."""
         status = self.app.status
@@ -254,6 +271,13 @@ class NowPlayingScreen(Screen):
         res = art_cache.get_track_art_and_palette(self.app.db, status.path, status.artist, status.album)
         self._art = art_cache.load_surface(res["art_path"], (320, 320))
         self._accent = art_cache.parse_palette(res["palette"])
+
+    def _reload_fav(self, status: PlayerStatus) -> None:
+        """Refresh the heart state when the track changes (one MPD call)."""
+        if status.path == self._fav_path:
+            return
+        self._fav_path = status.path
+        self._fav = self.app.mpd.is_favorite(status.path) if status.path else False
 
     def _update_text_cache(self, status: PlayerStatus) -> None:
         """Re-render text surfaces only when content changes."""

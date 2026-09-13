@@ -5,11 +5,13 @@ Wraps python-mpd2 with:
   - Absolute <-> relative path conversion
   - Clean PlayerStatus dataclass for the UI
   - play_paths() to replace the queue and start playback
+  - stored-playlist CRUD, and Favourites as one reserved playlist
 """
 
 from __future__ import annotations
 
 import functools
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -18,6 +20,21 @@ from time import time
 from typing import Optional
 
 import mpd
+
+# The Favourites list is just an ordinary stored playlist with a fixed name; the
+# heart toggle on Now Playing adds/removes the current track in it.
+FAVORITES = "Favorites"
+
+# MPD stores playlists as files under playlist_directory, so a name has to be a
+# safe single path segment. MPD itself rejects "/" and a leading ".", but it is
+# friendlier to sanitise here than to surface a protocol error.
+_NAME_MAX = 40
+
+
+def _safe_playlist_name(name: str) -> str:
+    """Trim a user-typed playlist name to something MPD will accept as a file."""
+    cleaned = re.sub(r'[/\\\x00-\x1f]', "", str(name)).strip().lstrip(".")
+    return cleaned[:_NAME_MAX].strip()
 
 
 def _tag(song: dict, key: str, default: str = "") -> str:
@@ -69,6 +86,13 @@ class QueueItem:
     pos:    int   # 0-based position in the MPD queue
     title:  str
     artist: str
+    path:   str = ""   # absolute path — lets a queue row be added to a playlist
+
+
+@dataclass
+class PlaylistInfo:
+    name:        str
+    track_count: int
 
 
 def _synchronized(fn):
@@ -310,6 +334,7 @@ class MusiMPDClient:
                 pos    = int(s.get("pos", 0)),
                 title  = _tag(s, "title", Path(s.get("file", "")).stem),
                 artist = _tag(s, "artist", ""),
+                path   = str(self._music_root / s["file"]) if s.get("file") else "",
             )
             for s in songs
         ]
@@ -353,6 +378,150 @@ class MusiMPDClient:
         if from_pos == to_pos:
             return
         self._cmd(lambda: self._client.move(from_pos, to_pos))
+
+    # ── stored playlists ──────────────────────────────────────────────────────
+
+    @_synchronized
+    def list_playlists(self) -> list["PlaylistInfo"]:
+        """All stored playlists, Favourites first, then case-insensitive name."""
+        if not self._ensure():
+            return []
+        try:
+            names = [p.get("playlist", "") for p in self._client.listplaylists()]
+        except Exception:
+            self._connected = False
+            return []
+        out: list[PlaylistInfo] = []
+        for name in names:
+            if not name:
+                continue
+            try:
+                count = len(self._client.listplaylist(name))
+            except Exception:
+                count = 0
+            out.append(PlaylistInfo(name, count))
+        out.sort(key=lambda p: (p.name != FAVORITES, p.name.lower()))
+        return out
+
+    @_synchronized
+    def playlist_tracks(self, name: str) -> list[dict]:
+        """The tracks in a stored playlist, as {path, title, artist, duration}."""
+        if not self._ensure():
+            return []
+        try:
+            songs = self._client.listplaylistinfo(name)
+        except Exception:
+            return []
+        out: list[dict] = []
+        for s in songs:
+            rel = s.get("file", "")
+            out.append({
+                "path":     str(self._music_root / rel) if rel else "",
+                "title":    _tag(s, "title", Path(rel).stem if rel else ""),
+                "artist":   _tag(s, "artist", ""),
+                "duration": float(s.get("duration", s.get("time", 0)) or 0),
+            })
+        return out
+
+    @_synchronized
+    def playlist_add(self, name: str, paths: list[Path | str]) -> None:
+        """Append tracks to a stored playlist, creating it if it does not exist."""
+        if not self._ensure():
+            return
+        name = _safe_playlist_name(name)
+        if not name:
+            return
+        try:
+            for p in paths:
+                self._client.playlistadd(name, self._to_relative(Path(p)))
+        except Exception:
+            self._connected = False
+
+    @_synchronized
+    def playlist_remove_at(self, name: str, pos: int) -> None:
+        self._cmd(lambda: self._client.playlistdelete(name, pos))
+
+    @_synchronized
+    def playlist_move(self, name: str, from_pos: int, to_pos: int) -> None:
+        if from_pos == to_pos:
+            return
+        self._cmd(lambda: self._client.playlistmove(name, from_pos, to_pos))
+
+    @_synchronized
+    def playlist_rename(self, old: str, new: str) -> None:
+        new = _safe_playlist_name(new)
+        if not new or new == old:
+            return
+        self._cmd(lambda: self._client.rename(old, new))
+
+    @_synchronized
+    def playlist_delete(self, name: str) -> None:
+        self._cmd(lambda: self._client.rm(name))
+
+    @_synchronized
+    def play_playlist(self, name: str, start_index: int = 0,
+                      shuffle: bool = False) -> None:
+        """Replace the queue with a stored playlist and start playing."""
+        if not self._ensure():
+            return
+        try:
+            self._client.clear()
+            self._client.load(name)
+            self._client.random(1 if shuffle else 0)
+            self._client.play(start_index)
+        except Exception:
+            self._connected = False
+
+    @_synchronized
+    def queue_playlist(self, name: str) -> None:
+        """Append a stored playlist to the end of the current queue."""
+        self._cmd(lambda: self._client.load(name))
+
+    @_synchronized
+    def save_queue_as(self, name: str) -> None:
+        """Save the current queue as a stored playlist, replacing any namesake."""
+        if not self._ensure():
+            return
+        name = _safe_playlist_name(name)
+        if not name:
+            return
+        try:
+            self._client.rm(name)
+        except Exception:
+            pass                       # no namesake to replace — fine
+        self._cmd(lambda: self._client.save(name))
+
+    # ── favourites (a reserved stored playlist) ───────────────────────────────
+
+    def _favorites_rel(self) -> list[str]:
+        """Relative paths in the Favourites playlist, [] if it does not exist."""
+        try:
+            return list(self._client.listplaylist(FAVORITES))
+        except Exception:
+            return []
+
+    @_synchronized
+    def is_favorite(self, abs_path: str) -> bool:
+        if not abs_path or not self._ensure():
+            return False
+        return self._to_relative(Path(abs_path)) in self._favorites_rel()
+
+    @_synchronized
+    def toggle_favorite(self, abs_path: str) -> bool:
+        """Add or remove a track in Favourites. Returns the new favourite state."""
+        if not abs_path or not self._ensure():
+            return False
+        rel = self._to_relative(Path(abs_path))
+        current = self._favorites_rel()
+        try:
+            if rel in current:
+                self._client.playlistdelete(FAVORITES, current.index(rel))
+                return False
+            self._client.playlistadd(FAVORITES, rel)
+            return True
+        except Exception:
+            self._connected = False
+            return rel in current
 
     # ── play history ──────────────────────────────────────────────────────────
 

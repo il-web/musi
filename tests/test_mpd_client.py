@@ -2,7 +2,8 @@
 import threading
 import time
 
-from musi.player.mpd_client import MusiMPDClient
+from musi.player.mpd_client import (FAVORITES, MusiMPDClient, PlaylistInfo,
+                                    _safe_playlist_name)
 
 
 class FakeSocketClient:
@@ -211,3 +212,142 @@ def test_concurrent_callers_are_serialised(tmp_path):
         f"{c._client.overlaps} overlapping entries — two threads were inside "
         "the MPD client at once"
     )
+
+
+# ── stored playlists + favourites ───────────────────────────────────────────
+
+class FakePlaylistMPD(FakeMPD):
+    """In-memory stand-in for MPD's stored-playlist + queue commands."""
+
+    def __init__(self):
+        super().__init__()
+        self.lists: dict[str, list[str]] = {}
+        self.queue_uris: list[str] = []
+        self.calls: list = []
+
+    def listplaylists(self):
+        return [{"playlist": name} for name in self.lists]
+
+    def listplaylist(self, name):
+        if name not in self.lists:
+            raise ValueError("No such playlist")
+        return list(self.lists[name])
+
+    def listplaylistinfo(self, name):
+        if name not in self.lists:
+            raise ValueError("No such playlist")
+        return [{"file": uri, "title": uri.rsplit("/", 1)[-1], "duration": "60"}
+                for uri in self.lists[name]]
+
+    def playlistadd(self, name, uri):
+        self.lists.setdefault(name, []).append(uri)
+
+    def playlistdelete(self, name, pos):
+        del self.lists[name][pos]
+
+    def playlistmove(self, name, frm, to):
+        item = self.lists[name].pop(frm)
+        self.lists[name].insert(to, item)
+
+    def rename(self, old, new):
+        self.lists[new] = self.lists.pop(old)
+
+    def rm(self, name):
+        if name not in self.lists:
+            raise ValueError("No such playlist")
+        del self.lists[name]
+
+    def save(self, name):
+        self.lists[name] = list(self.queue_uris)
+
+    def clear(self):
+        self.calls.append(("clear",))
+
+    def load(self, name):
+        self.calls.append(("load", name))
+
+    def random(self, v):
+        self.calls.append(("random", v))
+
+    def play(self, i):
+        self.calls.append(("play", i))
+
+
+def _playlist_client(tmp_path):
+    c = MusiMPDClient(music_root=tmp_path)
+    c._client = FakePlaylistMPD()
+    c.connect()
+    return c
+
+
+def test_safe_playlist_name_strips_path_chars_and_trims():
+    assert _safe_playlist_name("  road/trip  ") == "roadtrip"
+    assert _safe_playlist_name("...hidden") == "hidden"
+    assert _safe_playlist_name("x" * 80) == "x" * 40
+    assert _safe_playlist_name("a\\b\tc") == "abc"
+
+
+def test_playlist_add_stores_paths_relative_to_the_music_root(tmp_path):
+    c = _playlist_client(tmp_path)
+    c.playlist_add("Mix", [tmp_path / "band" / "song.flac"])
+    assert c._client.lists["Mix"] == ["band/song.flac"]
+
+
+def test_playlist_add_sanitises_the_name(tmp_path):
+    c = _playlist_client(tmp_path)
+    c.playlist_add("a/b", [tmp_path / "s.mp3"])
+    assert "ab" in c._client.lists and "a/b" not in c._client.lists
+
+
+def test_toggle_favorite_adds_then_removes(tmp_path):
+    c = _playlist_client(tmp_path)
+    p = str(tmp_path / "x.mp3")
+
+    assert c.is_favorite(p) is False
+    assert c.toggle_favorite(p) is True
+    assert c._client.lists[FAVORITES] == ["x.mp3"]
+    assert c.is_favorite(p) is True
+    assert c.toggle_favorite(p) is False
+    assert c._client.lists[FAVORITES] == []
+
+
+def test_is_favorite_false_when_the_list_does_not_exist(tmp_path):
+    c = _playlist_client(tmp_path)
+    assert c.is_favorite(str(tmp_path / "x.mp3")) is False
+
+
+def test_list_playlists_puts_favorites_first_then_case_insensitive(tmp_path):
+    c = _playlist_client(tmp_path)
+    c._client.lists = {"Zed": ["a"], FAVORITES: ["a", "b"], "abba": []}
+    got = c.list_playlists()
+    assert [p.name for p in got] == [FAVORITES, "abba", "Zed"]
+    assert got[0] == PlaylistInfo(FAVORITES, 2)
+
+
+def test_save_queue_as_replaces_any_namesake(tmp_path):
+    c = _playlist_client(tmp_path)
+    c._client.lists["Trip"] = ["old1", "old2"]
+    c._client.queue_uris = ["new1", "new2", "new3"]
+    c.save_queue_as("Trip")
+    assert c._client.lists["Trip"] == ["new1", "new2", "new3"]
+
+
+def test_playlist_move_reorders_in_place(tmp_path):
+    c = _playlist_client(tmp_path)
+    c._client.lists["Mix"] = ["a", "b", "c", "d"]
+    c.playlist_move("Mix", 0, 2)
+    assert c._client.lists["Mix"] == ["b", "c", "a", "d"]
+
+
+def test_playlist_tracks_returns_absolute_paths(tmp_path):
+    c = _playlist_client(tmp_path)
+    c._client.lists["Mix"] = ["band/song.flac"]
+    tracks = c.playlist_tracks("Mix")
+    assert tracks[0]["path"] == str(tmp_path / "band" / "song.flac")
+    assert tracks[0]["duration"] == 60.0
+
+
+def test_play_playlist_clears_loads_and_plays(tmp_path):
+    c = _playlist_client(tmp_path)
+    c.play_playlist("Mix", start_index=2, shuffle=True)
+    assert c._client.calls == [("clear",), ("load", "Mix"), ("random", 1), ("play", 2)]
