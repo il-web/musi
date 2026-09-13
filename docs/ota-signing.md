@@ -82,20 +82,25 @@ Check it landed:
 gpg --list-keys --keyid-format=long        # expect [ultimate] next to the uid
 ```
 
-**Current key** (musi, generated 2026-09-07, expires 2028-09-06):
+**Current key** (musi, generated 2026-09-13, expires 2028-09-12):
 
 ```
-ed25519/2BE3D6BAA4B77A77
-554FC6C5E79E9F18AFE862732BE3D6BAA4B77A77
+ed25519/182402EB2A9AFABD
+CCC9846DC167DD68665460BF182402EB2A9AFABD
 Ilay <4ilayf@gmail.com>
 ```
 
-**Rotated 2026-09-07.** The previous key — `ed25519/52BA31D3E4F34050`,
-fingerprint `CE2574AF3AB61492EFC9A5D852BA31D3E4F34050` — was lost with the dev
+**Rotated 2026-09-13.** The previous key — `ed25519/2BE3D6BAA4B77A77`,
+fingerprint `554FC6C5E79E9F18AFE862732BE3D6BAA4B77A77` — was lost with the dev
 machine it lived on, so it was replaced via "If you get locked out" below. A Pi
 that still trusts only the old fingerprint will reject every update until the
 new public key is imported: run step 4 again. The old key is dead, not
 compromised, so there is nothing to revoke.
+
+This key has no passphrase, by design: commits from this dev machine
+(including automated ones) sign without a pinentry prompt. The threat this
+scheme defends against is GitHub-account compromise, not this machine being
+compromised — see "What this does and does not protect" below.
 
 ## 5. Verify end to end
 
