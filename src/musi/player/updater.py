@@ -30,6 +30,9 @@ REPO_DIR = Path(__file__).resolve().parents[3]
 
 # systemd user service that runs the app (see pi/musi-ui.service)
 SERVICE = "musi-ui"
+# Other user services running this checkout's code. They must restart too, or
+# they keep serving the previous version (the web page did, after d62a6e5).
+OTHER_SERVICES = ("musi-api",)
 
 
 @dataclass
@@ -217,6 +220,12 @@ def _install_and_restart(step: "Callable[[float, str], None]") -> tuple[bool, st
     # Restart the service — this terminates the current process and relaunches
     # the player on the new code. Detached so the SIGTERM doesn't pre-empt logging.
     step(0.95, "Restarting…")
+    for other in OTHER_SERVICES:            # best-effort: never blocks the update
+        try:
+            subprocess.run(["systemctl", "--user", "restart", other],
+                           capture_output=True, timeout=30)
+        except Exception:
+            logging.warning("could not restart %s", other, exc_info=True)
     try:
         subprocess.Popen(
             ["systemctl", "--user", "restart", SERVICE],

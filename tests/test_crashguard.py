@@ -200,3 +200,17 @@ def test_crash_log_lists_newest_first():
             "=== 2026-10-09 11:00:00 · version bbb ===\nnew crash\n\n")
     headers = [r for r, h in log_rows(text) if h]
     assert headers[0].endswith("version bbb") and headers[1].endswith("version aaa")
+
+
+def test_an_update_restarts_the_web_service_too(monkeypatch):
+    """The updater used to restart only the player, leaving musi-api serving
+    the previous version's web page until the next reboot."""
+    ran, spawned = [], []
+    monkeypatch.setattr(updater.subprocess, "run",
+                        lambda cmd, **kw: ran.append(cmd) or
+                        type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda cmd, **kw: spawned.append(cmd))
+    ok, _ = updater._install_and_restart(lambda f, l: None)
+    assert ok
+    assert ["systemctl", "--user", "restart", "musi-api"] in ran
+    assert spawned == [["systemctl", "--user", "restart", "musi-ui"]]   # the player last
