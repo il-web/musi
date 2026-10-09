@@ -201,6 +201,8 @@ class AlbumScreen(ListScreen):
             ("Add to Favourites", lambda: self.app.mpd.playlist_add(
                 FAVORITES, [t["path"]])),
             ("Add to playlist…",  lambda: self._add_to_playlist([t["path"]])),
+            ("Start radio",       lambda: _start_radio(self.app, {
+                **t, "artist": self._artist_name})),
         ]))
         return True
 
@@ -262,3 +264,8 @@ def _draw_shuffle(surface, cx, cy, col) -> None:
         pygame.draw.polygon(surface, col,
                             [(cx + 5, cy + dy - 3), (cx + 5, cy + dy + 3),
                              (cx + 11, cy + dy)])
+
+
+def _start_radio(app, track: dict) -> None:
+    from musi.player.screens.mix import start_radio
+    start_radio(app, track)

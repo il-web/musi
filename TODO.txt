@@ -302,6 +302,22 @@ DONE
       songs (for when Navidrome forwards its plays) — Navidrome still gets
       its scrobble. Only on the web page so far, not on the device screen
 
+[x] Smart mixes pack
+    - library/mixes.py: Daily Mix (favourites + rediscoveries + rarely
+      played, seeded by date), On Repeat (30-day plays + ListenBrainz month
+      stats), Forgotten Favourites (>=3 plays, none in 60 days + LB all-time
+      minus month), and ListenBrainz's own Daily Jams / Weekly Jams / Weekly
+      Exploration (newest of each). LB is public data: username only — from
+      the connected token, else pref listenbrainz_user (web Settings field)
+    - LB tracks matched to the library by artist + title (suffixes like
+      "(Remastered)" and feat. artists ignored), local files beat server
+      copies, unmatched skipped; mixes with too little data aren't offered
+    - Music home: "Made for you" shelf (gradient cards), built on a worker
+      every 30 min at most; MixScreen = read-only playlist look
+    - Song radio: long-press "Start radio" (album, search, mix screens) —
+      Navidrome getSimilarSongs (needs its Last.fm agent), unsynced
+      suggestions streamed directly; fallback same artist + library spread
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

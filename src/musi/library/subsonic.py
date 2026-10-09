@@ -194,6 +194,17 @@ class Client:
                 return
             offset += page
 
+    def similar_songs(self, song_id: str, count: int = 50) -> list[dict]:
+        """Songs like this one (Navidrome asks Last.fm etc. — needs its
+        external agents configured; returns [] when it has nothing)."""
+        body = self.call("getSimilarSongs", id=song_id, count=count)
+        return (body.get("similarSongs") or {}).get("song") or []
+
+    def search_songs(self, query: str, count: int = 10) -> list[dict]:
+        body = self.call("search3", query=query, songCount=count,
+                         albumCount=0, artistCount=0)
+        return (body.get("searchResult3") or {}).get("song") or []
+
     def cover_art(self, cover_id: str, size: int = 600) -> bytes:
         try:
             return self._open(self.cover_art_url(cover_id, size))

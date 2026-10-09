@@ -26,6 +26,9 @@ DEFAULTS: dict[str, object] = {
     # Leave music-server songs out of musi's own ListenBrainz scrobbles — for
     # when the server (Navidrome) already forwards its plays to ListenBrainz.
     "listenbrainz_skip_server": False,
+    # ListenBrainz account for Smart Mixes (public data: no token needed).
+    # Ignored when a token is connected — its account is used instead.
+    "listenbrainz_user": "",
 }
 
 # Seconds MPD blends over when crossfade is on (MPD's "off" is zero, so the
@@ -40,6 +43,7 @@ EDITABLE: dict[str, object] = {
     "animations": bool,
     "listenbrainz_skip_server": bool,
     "wallpaper": ("none", "warm", "cool"),
+    "listenbrainz_user": str,
 }
 
 
@@ -47,6 +51,9 @@ def validate(key: str, value: object) -> bool:
     rule = EDITABLE.get(key)
     if rule is bool:
         return isinstance(value, bool)
+    if rule is str:                     # a ListenBrainz user name
+        return isinstance(value, str) and len(value) <= 64 and all(
+            c.isalnum() or c in "._-" for c in value)
     return isinstance(rule, tuple) and value in rule
 
 _cache: dict[str, object] | None = None

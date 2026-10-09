@@ -1,4 +1,8 @@
-"""Home — a greeting and shelves of album art.
+"""Home — a greeting, "Made for you" mixes, and shelves of album art.
+
+Mixes (library/mixes.py) are built on a worker thread — ListenBrainz is a
+network call — and show up on the shelf when ready; draw() only swaps in a
+finished list.
 
 A shelf with no rows is NOT drawn. play_history is empty on every fresh
 install, so a naive Home would greet a new user with two empty strips. On
@@ -18,6 +22,7 @@ from datetime import datetime
 
 import pygame
 
+from musi.library import mixes as mixes_lib
 from musi.player import (album_queries, art_cache, audio_detect, backdrop,
                          statusbar, theme)
 from musi.player.input import Button
@@ -83,15 +88,30 @@ class HomeScreen(Screen):
         self._press_y = 0
         self._last_x  = 0
         self._last_y  = 0
+        self._mix_version = -1      # which mixes_lib build the shelf shows
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def on_enter(self) -> None:
         self._load()
+        try:
+            # build from the same database file this screen reads
+            row = self.app.db.execute("PRAGMA database_list").fetchone()
+            if row and row[2]:
+                mixes_lib.refresh_async(row[2])
+        except Exception:
+            pass
 
     def _load(self) -> None:
         """All the screen's SQL, once. Empty shelves are dropped here."""
         self.shelves = []
+        self._mix_version, made = mixes_lib.ready()
+        if made:
+            rows = [{"kind": "mix", "mix": m, "title": m.title, "artist": m.subtitle}
+                    for m in made]
+            shelf = Shelf(item_w=CELL, gap=GAP, view_w=320 - MARGIN)
+            shelf.set_count(len(rows), reset=True)
+            self.shelves.append(("Made for you", rows, shelf))
         for title, query in _SHELVES:
             rows = query(self.app.db)
             if not rows:
@@ -118,6 +138,9 @@ class HomeScreen(Screen):
     # ── draw ──────────────────────────────────────────────────────────────────
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
+        version, made = mixes_lib.ready()
+        if version != self._mix_version and self._drag is None:
+            self._swap_mixes(version, made)      # a build landed: no SQL here
         self._moving = False
         for _, _, shelf in self.shelves:
             if shelf.update():
@@ -171,7 +194,25 @@ class HomeScreen(Screen):
             self._draw_cell(surface, x, ay, rows[di])
         surface.set_clip(region)
 
+    def _swap_mixes(self, version: int, made: list) -> None:
+        self._mix_version = version
+        self.shelves = [s for s in self.shelves if s[0] != "Made for you"]
+        if made:
+            rows = [{"kind": "mix", "mix": m, "title": m.title, "artist": m.subtitle}
+                    for m in made]
+            shelf = Shelf(item_w=CELL, gap=GAP, view_w=320 - MARGIN)
+            shelf.set_count(len(rows), reset=True)
+            self.shelves.insert(0, ("Made for you", rows, shelf))
+        self._max_scroll = max(0.0, len(self.shelves) * SHELF_H - self._view_h)
+
     def _draw_cell(self, surface, x, y, row) -> None:
+        if _is_mix(row):
+            surface.blit(_mix_card(row["mix"]), (x, y))
+            surface.blit(theme.render_cached(row["title"], 10, theme.WHITE, max_width=CELL),
+                         (x, y + CELL + 5))
+            surface.blit(theme.render_cached(row["artist"], 9, theme.DIM, max_width=CELL),
+                         (x, y + CELL + 18))
+            return
         art = art_cache.load_art_thumbnail(row["art_path"] or "", CELL)
         if art:
             surface.blit(art, (x, y))
@@ -265,7 +306,10 @@ class HomeScreen(Screen):
 
         if axis is None:                       # never passed the slop → a tap
             di = shelf.index_at(x - MARGIN)
-            if 0 <= di < len(rows):
+            if 0 <= di < len(rows) and _is_mix(rows[di]):
+                from musi.player.screens.mix import MixScreen
+                self.app.push(MixScreen(self.app, rows[di]["mix"]))
+            elif 0 <= di < len(rows):
                 from musi.player.screens.album import AlbumScreen
                 self.app.push(AlbumScreen(self.app, rows[di]["id"]))
 
@@ -274,3 +318,40 @@ class HomeScreen(Screen):
         Positive dy = finger moved down; content follows the finger."""
         self._scroll -= dy
         self._clamp_scroll()
+
+
+_cards: dict[tuple, pygame.Surface] = {}
+
+
+def _is_mix(row) -> bool:
+    """Mix rows are dicts; album rows are sqlite3.Row (no .get)."""
+    return isinstance(row, dict) and row.get("kind") == "mix"
+
+
+def _mix_card(mix) -> pygame.Surface:
+    """Gradient tile with the mix's name — built once per mix look.
+
+    Same recipe as app_tiles: a 2×2 gradient smoothscaled up (opaque — the
+    Pi-safe kind), then rounded with a mask. Blitted onto the opaque frame.
+    """
+    key = (mix.key, mix.title, mix.colours)
+    hit = _cards.get(key)
+    if hit is not None:
+        return hit
+    c0, c1 = mix.colours
+    grad = pygame.Surface((2, 2))
+    grad.set_at((0, 0), c0)
+    grad.set_at((1, 0), c0)
+    grad.set_at((0, 1), c1)
+    grad.set_at((1, 1), c1)
+    card = pygame.transform.smoothscale(grad, (CELL, CELL)).convert_alpha()
+    mask = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+    pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, CELL, CELL), border_radius=8)
+    card.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    y = 10
+    for row in theme.wrap(mix.title, 14, True, CELL - 16)[:3]:
+        t = theme.render(row, 14, theme.WHITE, bold=True, max_width=CELL - 16)
+        card.blit(t, (8, y))                     # even x — see blit.py
+        y += t.get_height()
+    _cards[key] = card
+    return card

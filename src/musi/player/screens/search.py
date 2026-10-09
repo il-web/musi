@@ -106,6 +106,8 @@ class SearchScreen(ListScreen):
             ("Add to Favourites", lambda: self.app.mpd.playlist_add(
                 FAVORITES, [res.path])),
             ("Add to playlist…",  lambda: self._add_to_playlist([res.path])),
+            ("Start radio",       lambda: _start_radio(self.app, {
+                "path": res.path, "title": res.title, "artist": res.artist})),
         ]))
         return True
 
@@ -312,4 +314,6 @@ def _magnifier(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
     pygame.draw.line(surface, col, (cx + 3, cy + 3), (cx + 7, cy + 7), 2)
 
 
-
+def _start_radio(app, track: dict) -> None:
+    from musi.player.screens.mix import start_radio
+    start_radio(app, track)

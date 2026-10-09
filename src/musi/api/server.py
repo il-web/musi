@@ -194,6 +194,11 @@ h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
     </div>
     <div class="btns hide" id="lb-out" style="padding:4px 0 12px">
       <button class="btn ghost" onclick="lbSignOut()">Sign out</button></div>
+    <div class="row"><div><span class="lbl">Username for mixes</span>
+      <span class="hint">Smart Mixes read your ListenBrainz playlists and top songs —
+      public data, no token needed</span></div>
+      <input type="text" data-pref="listenbrainz_user" placeholder="username"
+             style="width:140px" autocomplete="off" spellcheck="false"></div>
     <div class="row"><div><span class="lbl">Skip music-server songs</span>
       <span class="hint">Turn on if Navidrome already sends its plays to ListenBrainz,
       so they aren't counted twice</span></div>
@@ -312,7 +317,8 @@ async function loadSettings(){
           const o=document.createElement('option');o.value=c;
           o.textContent=c.charAt(0).toUpperCase()+c.slice(1);el.appendChild(o)});
         el.value=d.values[k];
-      }else el.checked=!!d.values[k];
+      }else if(el.type==='text')el.value=d.values[k]||'';
+      else el.checked=!!d.values[k];
     });
   }catch(e){}
   loadListenBrainz();loadServer();
@@ -320,7 +326,8 @@ async function loadSettings(){
 
 document.querySelectorAll('[data-pref]').forEach(el=>{
   el.addEventListener('change',async()=>{
-    const k=el.dataset.pref,v=el.tagName==='SELECT'?el.value:el.checked;
+    const k=el.dataset.pref,
+          v=el.tagName==='SELECT'||el.type==='text'?el.value.trim():el.checked;
     try{
       const r=await api('/api/v1/settings',{method:'PATCH',
         headers:{'Content-Type':'application/json'},body:JSON.stringify({[k]:v})});
