@@ -23,9 +23,34 @@ DEFAULTS: dict[str, object] = {
     "replaygain": False,
     # Screen transitions and Now Playing motion (Customization → Animations).
     "animations": True,
+    # Leave music-server songs out of musi's own ListenBrainz scrobbles — for
+    # when the server (Navidrome) already forwards its plays to ListenBrainz.
+    "listenbrainz_skip_server": False,
 }
 
+# Seconds MPD blends over when crossfade is on (MPD's "off" is zero, so the
+# pref is a bool and this is the only place the length is named).
+CROSSFADE_S = 2
+
+# What the web settings page (api/server.py) may change, and the allowed
+# values: bool, or a tuple of choices. Anything else is refused.
+EDITABLE: dict[str, object] = {
+    "crossfade": bool,
+    "replaygain": bool,
+    "animations": bool,
+    "listenbrainz_skip_server": bool,
+    "wallpaper": ("none", "warm", "cool"),
+}
+
+
+def validate(key: str, value: object) -> bool:
+    rule = EDITABLE.get(key)
+    if rule is bool:
+        return isinstance(value, bool)
+    return isinstance(rule, tuple) and value in rule
+
 _cache: dict[str, object] | None = None
+_mtime: float | None = None      # file mtime when _cache was loaded / written
 
 
 def reload() -> None:
@@ -34,10 +59,29 @@ def reload() -> None:
     _cache = None
 
 
+def refresh_if_changed() -> bool:
+    """Re-read the file if another process (the web settings page, via the
+    API service) has written it since. One stat() — the player calls this
+    every couple of seconds. Returns True if the values were reloaded."""
+    try:
+        mtime = config.prefs_path().stat().st_mtime
+    except OSError:
+        return False
+    if _cache is not None and mtime == _mtime:
+        return False
+    reload()
+    _load()
+    return True
+
+
 def _load() -> dict[str, object]:
-    global _cache
+    global _cache, _mtime
     if _cache is not None:
         return _cache
+    try:
+        _mtime = config.prefs_path().stat().st_mtime
+    except OSError:
+        _mtime = None
 
     values = dict(DEFAULTS)
     try:
@@ -85,6 +129,8 @@ def set(key: str, value: object) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
+        global _mtime
+        _mtime = path.stat().st_mtime        # our own write isn't "a change"
     except OSError:
         logging.warning("could not persist prefs", exc_info=True)
         try:

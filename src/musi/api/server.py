@@ -75,7 +75,7 @@ _HTML = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>musi — WiFi Transfer</title>
+<title>musi</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0a0a0f;color:#fff;font-family:-apple-system,system-ui,sans-serif;
@@ -103,9 +103,47 @@ h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
      background:#ff5c8a;color:#fff;font-size:1em;font-weight:600;cursor:pointer;
      font-family:inherit}
 .gate .err{color:#ff5c8a;min-height:1.2em;margin-top:10px;font-size:.85em}
-.hide{display:none}
+.hide{display:none!important}   /* beats .stack/.btns, declared later */
 .signout{margin-top:28px;background:none;border:0;color:#50505f;font-size:.8em;
      cursor:pointer;text-decoration:underline;font-family:inherit}
+.tabs{display:flex;gap:6px;background:#16162a;border-radius:12px;padding:4px;
+      width:100%;max-width:480px;margin-bottom:26px}
+.tabs button{flex:1;padding:10px;border:0;border-radius:9px;background:none;color:#78788a;
+      font-size:.95em;font-weight:600;cursor:pointer;font-family:inherit}
+.tabs button.on{background:#ff5c8a;color:#fff}
+.panel{width:100%;max-width:480px}
+.sec{background:#16162a;border-radius:14px;padding:6px 16px;margin-bottom:18px}
+.sec h2{font-size:.75em;text-transform:uppercase;letter-spacing:.08em;color:#78788a;
+        margin:12px 0 4px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+     padding:12px 0;border-top:1px solid #22223a}
+.row:first-of-type{border-top:0}
+.row .lbl{font-size:.95em}
+.row .hint{display:block;color:#78788a;font-size:.78em;margin-top:3px;line-height:1.4}
+.sw{position:relative;width:46px;height:26px;flex:none}
+.sw input{opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;background:#3c3c4e;border-radius:13px;transition:.2s;cursor:pointer}
+.sw span:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;
+     background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked+span{background:#ff5c8a}
+.sw input:checked+span:before{transform:translateX(20px)}
+.panel select,.panel input[type=text],.panel input[type=password],.panel input[type=url]{
+     padding:9px 10px;border-radius:9px;border:1px solid #2a2a3f;background:#0f0f1c;
+     color:#fff;font-size:.9em;font-family:inherit}
+.panel input[type=text],.panel input[type=password],.panel input[type=url]{width:100%}
+.stack{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-top:1px solid #22223a}
+.btns{display:flex;gap:8px}
+.btn{padding:10px 14px;border:0;border-radius:9px;background:#ff5c8a;color:#fff;
+     font-weight:600;cursor:pointer;font-family:inherit;font-size:.9em}
+.btn.ghost{background:#2a2a3f}
+.btn:disabled{opacity:.5;cursor:default}
+.state{color:#78788a;font-size:.85em;padding:10px 0 2px}
+.state b{color:#fff}
+.err2{color:#ff5c8a;font-size:.85em;min-height:1em}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#16162a;
+       border:1px solid #2a2a3f;color:#fff;padding:9px 16px;border-radius:20px;font-size:.85em;
+       opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
 </style>
 </head>
 <body>
@@ -120,6 +158,66 @@ h1{color:#ff5c8a;font-size:2.2em;letter-spacing:-1px;margin-bottom:4px}
   <button onclick="saveToken()">Unlock</button>
   <div class="err" id="gerr"></div>
 </div>
+
+<div class="tabs hide" id="tabs">
+  <button id="tab-up" class="on" onclick="tab('up')">Upload</button>
+  <button id="tab-set" onclick="tab('set')">Settings</button>
+</div>
+
+<div class="panel hide" id="settings">
+  <div class="sec">
+    <h2>Playback</h2>
+    <div class="row"><div><span class="lbl">Crossfade</span>
+      <span class="hint">Blend one song into the next over 2 seconds</span></div>
+      <label class="sw"><input type="checkbox" data-pref="crossfade"><span></span></label></div>
+    <div class="row"><div><span class="lbl">Volume leveling</span>
+      <span class="hint">ReplayGain — evens out songs tagged with it</span></div>
+      <label class="sw"><input type="checkbox" data-pref="replaygain"><span></span></label></div>
+  </div>
+
+  <div class="sec">
+    <h2>Display</h2>
+    <div class="row"><div><span class="lbl">Animations</span>
+      <span class="hint">Screen transitions and Now Playing motion</span></div>
+      <label class="sw"><input type="checkbox" data-pref="animations"><span></span></label></div>
+    <div class="row"><span class="lbl">Home wallpaper</span>
+      <select data-pref="wallpaper"></select></div>
+  </div>
+
+  <div class="sec">
+    <h2>ListenBrainz</h2>
+    <div class="state" id="lb-state">…</div>
+    <div class="stack" id="lb-connect">
+      <input type="text" id="lb-token" placeholder="User token from listenbrainz.org/settings"
+             autocomplete="off" spellcheck="false">
+      <div class="btns"><button class="btn" onclick="lbConnect()">Connect</button></div>
+    </div>
+    <div class="btns hide" id="lb-out" style="padding:4px 0 12px">
+      <button class="btn ghost" onclick="lbSignOut()">Sign out</button></div>
+    <div class="row"><div><span class="lbl">Skip music-server songs</span>
+      <span class="hint">Turn on if Navidrome already sends its plays to ListenBrainz,
+      so they aren't counted twice</span></div>
+      <label class="sw"><input type="checkbox" data-pref="listenbrainz_skip_server"><span></span></label></div>
+    <div class="err2" id="lb-err"></div>
+  </div>
+
+  <div class="sec">
+    <h2>Music server</h2>
+    <div class="state" id="ss-state">…</div>
+    <div class="stack" id="ss-connect">
+      <input type="url" id="ss-url" placeholder="Server address, e.g. 192.168.1.20:4533"
+             autocomplete="off" spellcheck="false">
+      <input type="text" id="ss-user" placeholder="Username" autocomplete="off" spellcheck="false">
+      <input type="password" id="ss-pass" placeholder="Password" autocomplete="off">
+      <div class="btns"><button class="btn" onclick="ssConnect()">Connect</button></div>
+    </div>
+    <div class="btns hide" id="ss-actions" style="padding:4px 0 12px">
+      <button class="btn" id="ss-sync" onclick="ssSync()">Sync now</button>
+      <button class="btn ghost" onclick="ssSignOut()">Sign out</button></div>
+    <div class="err2" id="ss-err"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
 
 <div class="drop hide" id="drop" onclick="document.getElementById('fi').click()">
   <svg width="44" height="44" viewBox="0 0 24 24" fill="none"
@@ -169,12 +267,156 @@ async function api(path,opts){
   return r;
 }
 
+let current='up';
 function show(unlocked){
   gate.classList.toggle('hide',unlocked);
-  drop.classList.toggle('hide',!unlocked);
-  stats.classList.toggle('hide',!unlocked);
+  document.getElementById('tabs').classList.toggle('hide',!unlocked);
   so.classList.toggle('hide',!unlocked);
+  if(unlocked){tab(current)}
+  else{
+    ['drop','stats','settings'].forEach(id=>document.getElementById(id).classList.add('hide'));
+    bw.style.display='none';st.textContent='';
+  }
 }
+
+function tab(which){
+  current=which;
+  const up=which==='up';
+  document.getElementById('tab-up').classList.toggle('on',up);
+  document.getElementById('tab-set').classList.toggle('on',!up);
+  drop.classList.toggle('hide',!up);
+  stats.classList.toggle('hide',!up);
+  st.classList.toggle('hide',!up);
+  document.getElementById('settings').classList.toggle('hide',up);
+  if(!up)loadSettings();
+}
+
+// ── settings ──────────────────────────────────────────────────────────────
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+async function errorOf(r){
+  if(r.status===423)return 'Storage is locked — unlock it in Settings → Power on the device';
+  try{const d=await r.json();return d.error||('HTTP '+r.status)}catch(e){return 'HTTP '+r.status}
+}
+
+async function loadSettings(){
+  try{
+    const r=await api('/api/v1/settings');const d=await r.json();
+    document.querySelectorAll('[data-pref]').forEach(el=>{
+      const k=el.dataset.pref;
+      if(el.tagName==='SELECT'){
+        if(!el.options.length)(d.choices[k]||[]).forEach(c=>{
+          const o=document.createElement('option');o.value=c;
+          o.textContent=c.charAt(0).toUpperCase()+c.slice(1);el.appendChild(o)});
+        el.value=d.values[k];
+      }else el.checked=!!d.values[k];
+    });
+  }catch(e){}
+  loadListenBrainz();loadServer();
+}
+
+document.querySelectorAll('[data-pref]').forEach(el=>{
+  el.addEventListener('change',async()=>{
+    const k=el.dataset.pref,v=el.tagName==='SELECT'?el.value:el.checked;
+    try{
+      const r=await api('/api/v1/settings',{method:'PATCH',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({[k]:v})});
+      if(!r.ok){toast(await errorOf(r));loadSettings();return}
+      toast('Saved');
+    }catch(e){}
+  });
+});
+
+async function loadListenBrainz(){
+  try{
+    const d=await (await api('/api/v1/listenbrainz')).json();
+    const s=document.getElementById('lb-state');
+    s.innerHTML=d.connected
+      ?'Scrobbling as <b>'+esc(d.user)+'</b>'+(d.queued?' · '+d.queued+' waiting to send':'')
+      :'Not connected';
+    document.getElementById('lb-connect').classList.toggle('hide',d.connected);
+    document.getElementById('lb-out').classList.toggle('hide',!d.connected);
+  }catch(e){}
+}
+
+async function lbConnect(){
+  const e=document.getElementById('lb-err'),t=document.getElementById('lb-token');
+  e.textContent='';
+  if(!t.value.trim()){e.textContent='Paste your token first';return}
+  try{
+    const r=await api('/api/v1/listenbrainz',{method:'PUT',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t.value.trim()})});
+    if(!r.ok){e.textContent=await errorOf(r);return}
+    t.value='';toast('ListenBrainz connected');loadListenBrainz();
+  }catch(x){}
+}
+
+async function lbSignOut(){
+  try{await api('/api/v1/listenbrainz',{method:'DELETE'});loadListenBrainz()}catch(x){}
+}
+
+let ssTimer=null;
+function ago(ts){
+  if(!ts)return 'never';
+  const s=Math.max(0,Math.floor(Date.now()/1000-ts));
+  if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+' min ago';
+  if(s<86400)return Math.floor(s/3600)+' h ago';return Math.floor(s/86400)+' d ago';
+}
+
+async function loadServer(){
+  try{
+    const d=await (await api('/api/v1/subsonic')).json();
+    const s=document.getElementById('ss-state'),j=d.sync||{};
+    if(j.running){
+      s.innerHTML='Syncing… <b>'+esc(j.phase||'')+'</b>'+(j.total?' '+j.done+'/'+j.total:'');
+    }else if(d.configured){
+      s.innerHTML='<b>'+esc(d.username)+'</b> on '+esc(d.url)+'<br>'+
+        (d.track_count||0)+' songs · synced '+ago(d.last_sync)+
+        (d.last_error?' · <span style="color:#ff5c8a">last sync failed: '+esc(d.last_error)+'</span>':'');
+    }else s.textContent='Not connected — stream from Navidrome or any Subsonic server';
+    document.getElementById('ss-connect').classList.toggle('hide',!!d.configured);
+    document.getElementById('ss-actions').classList.toggle('hide',!d.configured);
+    document.getElementById('ss-sync').disabled=!!j.running;
+    if(j.running&&!ssTimer)ssTimer=setInterval(loadServer,2000);
+    if(!j.running&&ssTimer){clearInterval(ssTimer);ssTimer=null}
+  }catch(e){}
+}
+
+async function ssConnect(){
+  const e=document.getElementById('ss-err');e.textContent='Checking login…';
+  const body={url:document.getElementById('ss-url').value.trim(),
+              username:document.getElementById('ss-user').value.trim(),
+              password:document.getElementById('ss-pass').value};
+  try{
+    const r=await api('/api/v1/subsonic',{method:'PUT',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){e.textContent=await errorOf(r);return}
+    e.textContent='';document.getElementById('ss-pass').value='';
+    toast('Connected — syncing');loadServer();
+  }catch(x){e.textContent=''}
+}
+
+async function ssSync(){
+  try{
+    const r=await api('/api/v1/subsonic/sync',{method:'POST'});
+    if(!r.ok&&r.status!==202){document.getElementById('ss-err').textContent=await errorOf(r);return}
+    loadServer();
+  }catch(x){}
+}
+
+async function ssSignOut(){
+  if(!confirm('Sign out of the music server? Its songs are removed from musi.'))return;
+  try{
+    const r=await api('/api/v1/subsonic',{method:'DELETE'});
+    if(!r.ok){document.getElementById('ss-err').textContent=await errorOf(r);return}
+    loadServer();
+  }catch(x){}
+}
+
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML}
 
 function lock(msg){
   token='';localStorage.removeItem(KEY);
@@ -315,6 +557,25 @@ def _mpd_update() -> None:
         client.disconnect()
     except Exception:
         log.info("mpd db update skipped (no MPD?)")
+
+
+def _mpd_apply(crossfade: "bool | None" = None, replaygain: "bool | None" = None) -> None:
+    """Push playback settings to MPD (best-effort; the player re-applies the
+    stored prefs at its next start anyway)."""
+    from musi.player.prefs import CROSSFADE_S
+    try:
+        from mpd import MPDClient
+        client = MPDClient()
+        client.timeout = 5
+        client.connect("127.0.0.1", 6600)
+        if crossfade is not None:
+            client.crossfade(CROSSFADE_S if crossfade else 0)
+        if replaygain is not None:
+            client.replay_gain_mode("auto" if replaygain else "off")
+        client.close()
+        client.disconnect()
+    except Exception:
+        log.info("mpd settings push skipped (no MPD?)")
 
 
 def _uptime_s() -> int:
@@ -583,6 +844,37 @@ def create_app(
         if not job.start(db_path, art_dir) and not job.running:
             return jsonify(error=job.error or "no music server set up"), 409
         return jsonify(_subsonic_state()), 202
+
+    # ── player settings (the web page's Settings panel) ──────────────────────
+
+    @app.get("/api/v1/settings")
+    def api_settings_get():
+        from musi.player import prefs
+        prefs.refresh_if_changed()          # the player may have changed them
+        return jsonify(
+            values={k: prefs.get(k) for k in prefs.EDITABLE},
+            choices={k: list(v) for k, v in prefs.EDITABLE.items() if isinstance(v, tuple)},
+        )
+
+    @app.patch("/api/v1/settings")
+    def api_settings_patch():
+        """Change player settings. The player picks the file change up within
+        two seconds; crossfade and volume leveling are pushed to MPD here, so
+        they take effect even if the UI isn't running."""
+        from musi.player import prefs
+        changes = request.get_json(silent=True)
+        if not isinstance(changes, dict) or not changes:
+            return jsonify(error="JSON object of settings required"), 400
+        bad = sorted(k for k, v in changes.items() if not prefs.validate(k, v))
+        if bad:
+            return jsonify(error=f"invalid: {', '.join(bad)}"), 400
+        prefs.refresh_if_changed()
+        for k, v in changes.items():
+            prefs.set(k, v)
+        if "crossfade" in changes or "replaygain" in changes:
+            _mpd_apply(crossfade=changes.get("crossfade"),
+                       replaygain=changes.get("replaygain"))
+        return jsonify(values={k: prefs.get(k) for k in prefs.EDITABLE})
 
     # ── ListenBrainz ──────────────────────────────────────────────────────────
 

@@ -72,6 +72,7 @@ class App:
         self._frame:           pygame.Surface | None = None   # offscreen, for transitions
         self._remote_meta:     dict[str, dict | None] = {}
         self._last_bg:         float        = 0.0    # last background-jobs tick
+        self._last_prefs:      float        = 0.0    # last settings-file check
         from musi.player.scrobbler import Scrobbler
         self._scrobbler = Scrobbler()
         # called once, after the first frame reaches the panel (crashguard)
@@ -271,6 +272,12 @@ class App:
                 self._poll_time = now
                 self._maybe_record_play()
                 self._scrobbler.update(self._status)
+
+            # ── settings changed from the web page? (one stat, every 2 s) ─────
+            if now - self._last_prefs >= 2.0:
+                self._last_prefs = now
+                from musi.player import prefs
+                prefs.refresh_if_changed()
 
             # ── background jobs (once a minute) ───────────────────────────────
             if now - self._last_bg >= 60.0:

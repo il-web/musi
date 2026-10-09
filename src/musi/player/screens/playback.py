@@ -15,9 +15,7 @@ from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import SWITCH_W, draw_switch
 
-# Seconds MPD blends over when crossfade is on. Zero is how MPD spells "off",
-# so the pref is a bool and this is the only place the duration is named.
-CROSSFADE_S = 2
+CROSSFADE_S = prefs.CROSSFADE_S
 
 # (key, title, subtitle). key: a bool pref toggled in place, or "listenbrainz"
 ROWS: list[tuple[str, str, str]] = [

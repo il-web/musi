@@ -288,6 +288,20 @@ DONE
       Live check 2026-10-09: Houdini, Blinding Lights, Anti-Hero word-synced
       via NetEase; reachable from the Pi
 
+[x] Web settings pack
+    - Web page (musi-api "/"): Upload | Settings tabs after unlocking.
+      Settings: crossfade, volume leveling, animations, wallpaper,
+      ListenBrainz connect / sign out / "skip music-server songs", music
+      server connect / sync now (live progress) / sign out
+    - GET/PATCH /api/v1/settings; prefs.EDITABLE whitelists keys + values
+      (anything else 400, whole request refused); crossfade + ReplayGain
+      pushed to MPD by the API directly; CROSSFADE_S moved to prefs
+    - Player: prefs.refresh_if_changed() every 2 s (one stat) picks up
+      changes written by the API process; its own writes don't count
+    - New pref listenbrainz_skip_server: musi's ListenBrainz skips Navidrome
+      songs (for when Navidrome forwards its plays) — Navidrome still gets
+      its scrobble. Only on the web page so far, not on the device screen
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

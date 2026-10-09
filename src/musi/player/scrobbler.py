@@ -90,15 +90,24 @@ def _safe(fn, *args) -> None:
         logging.warning("scrobble receiver failed", exc_info=True)
 
 
+def _to_listenbrainz(path: str) -> bool:
+    """Server songs can be left to the server: Navidrome may already forward
+    its plays to ListenBrainz, and then musi sending them too doubles them."""
+    from musi.player import prefs
+    return not (remote.is_server(path) and prefs.get("listenbrainz_skip_server"))
+
+
 def _default_start(meta: dict) -> None:
-    from musi.library import listenbrainz, remote, subsonic
-    listenbrainz.playing_now(meta)
+    from musi.library import listenbrainz, subsonic
+    if _to_listenbrainz(meta["path"]):
+        listenbrainz.playing_now(meta)
     if remote.is_server(meta["path"]):
         subsonic.scrobble_async(meta["path"], submission=False)
 
 
 def _default_listen(meta: dict, started_at: float) -> None:
-    from musi.library import listenbrainz, remote, subsonic
-    listenbrainz.record_listen(meta, started_at)
+    from musi.library import listenbrainz, subsonic
+    if _to_listenbrainz(meta["path"]):
+        listenbrainz.record_listen(meta, started_at)
     if remote.is_server(meta["path"]):
         subsonic.scrobble_async(meta["path"], submission=True)
