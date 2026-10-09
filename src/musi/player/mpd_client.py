@@ -137,6 +137,10 @@ class MusiMPDClient:
         # their own; the app plugs in a library lookup (url -> {title, artist,
         # album, duration}) so they still show proper names.
         self.remote_meta: Callable[[str], Optional[dict]] | None = None
+        # Called before musi starts its own playback. The app sets it to end
+        # an AirPlay session first: the phone holds the audio output until
+        # then, and MPD would fail to open it.
+        self.before_play: Callable[[], None] | None = None
         self._host = host
         self._port = port
         self._lock = threading.RLock()   # see _synchronized
@@ -330,6 +334,7 @@ class MusiMPDClient:
     @_synchronized
     def play_paths(self, paths: list[Path | str], start_index: int = 0) -> None:
         """Replace the MPD queue with the given absolute paths and start playing."""
+        self._take_output()
         if not self._ensure():
             return
         try:
@@ -366,6 +371,7 @@ class MusiMPDClient:
     @_synchronized
     def play_pos(self, pos: int) -> None:
         """Jump to and play the track at queue position ``pos``."""
+        self._take_output()
         self._cmd(lambda: self._client.play(pos))
 
     @_synchronized
@@ -486,6 +492,7 @@ class MusiMPDClient:
     def play_playlist(self, name: str, start_index: int = 0,
                       shuffle: bool = False) -> None:
         """Replace the queue with a stored playlist and start playing."""
+        self._take_output()
         if not self._ensure():
             return
         try:
@@ -566,6 +573,15 @@ class MusiMPDClient:
             logging.warning('Ignored exception', exc_info=True)
 
     # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _take_output(self) -> None:
+        hook = getattr(self, "before_play", None)
+        if hook is not None:
+            try:
+                hook()
+            except Exception:
+                import logging
+                logging.warning("before_play hook failed", exc_info=True)
 
     def _to_relative(self, path: "Path | str") -> str:
         """Convert absolute path to MPD-relative path. A stream URL is already

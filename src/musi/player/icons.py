@@ -135,3 +135,18 @@ def with_radio(text: pygame.Surface, col: tuple) -> pygame.Surface:
     out.blit(text, (0, 0))
     draw_radio(out, w + 10, h // 2, col)
     return out
+
+
+def draw_airplay(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
+    """AirPlay mark: a screen outline over a triangle."""
+    pygame.draw.rect(surface, col, (cx - 6, cy - 6, 13, 9), 2, border_radius=2)
+    pygame.draw.polygon(surface, col, [(cx - 4, cy + 7), (cx + 5, cy + 7), (cx, cy + 1)])
+
+
+def with_airplay(text: pygame.Surface, col: tuple) -> pygame.Surface:
+    """``text`` with the AirPlay tag baked in after it (like with_cloud)."""
+    w, h = text.get_size()
+    out = pygame.Surface((w + CLOUD_W, h), pygame.SRCALPHA)
+    out.blit(text, (0, 0))
+    draw_airplay(out, w + 10, h // 2, col)
+    return out

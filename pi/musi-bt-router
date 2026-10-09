@@ -55,19 +55,26 @@ current_target() {
   sed -n 's/.*slave\.pcm "\(.*\)".*/\1/p' "$ASOUNDRC" 2>/dev/null | head -1
 }
 
+# Resume MPD on the new output — unless the phone is playing over AirPlay
+# (flag written by musi-airplay): starting MPD then would fight it.
+resume() {
+  [ -f /tmp/musi-airplay ] && return
+  mpc -q play 2>/dev/null
+}
+
 to_bt() {
   want="bluealsa:DEV=$1,PROFILE=a2dp"
   # One connect emits several PCM events (a2dp source + sink); only act on the
   # first. If already routed to this device, just ensure playback — no restart.
   if [ "$(current_target)" = "$want" ]; then
-    mpc -q play 2>/dev/null
+    resume
     return
   fi
   bt_name "$1" > "$FLAG"
   write_bt "$1"
   restart_mpd
   rm -f "$FLAG"
-  mpc -q play 2>/dev/null
+  resume
 }
 
 to_dac() {

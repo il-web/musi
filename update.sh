@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=7
+LATEST_STEP=8
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -236,6 +236,33 @@ root_5() {
     if [ -f "$cmdline" ] && ! grep -q 'video=HDMI-A-1:d' "$cmdline"; then
         sed -i -e '1s/[[:space:]]*$//' -e '1s/$/ video=HDMI-A-1:d/' "$cmdline"
     fi
+}
+
+# ── step 8: AirPlay receiver (2026-10-09) ─────────────────────────────────────
+# shairport-sync runs as a *user* service (musi-airplay) so it plays through
+# the user's ~/.asoundrc output — DAC or Bluetooth — and talks on the session
+# bus. The package itself needs root, so like mpdris2 (step 6) it is installed
+# once by hand; everything else ships over OTA. The unit carries a
+# ConditionPathExists, so installing the package later just works from the
+# next boot. The router is re-copied: it no longer restarts MPD over AirPlay.
+user_8() {
+    install -m 0755 "$REPO/pi/musi-bt-router" "$HOME/.local/bin/musi-bt-router"
+    install -m 0755 "$REPO/pi/musi-airplay" "$HOME/.local/bin/musi-airplay"
+    sed -i 's/\r$//' "$HOME/.local/bin/musi-bt-router" "$HOME/.local/bin/musi-airplay"
+    mkdir -p "$HOME/.config/musi" "$HOME/.config/systemd/user"
+    sed "s|@HOME@|$HOME|g" "$REPO/pi/shairport-sync.conf" > "$HOME/.config/musi/shairport-sync.conf"
+    install -m 0644 "$REPO/pi/musi-airplay.service" "$HOME/.config/systemd/user/musi-airplay.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable musi-airplay 2>/dev/null || true
+    systemctl --user restart musi-bt-router 2>/dev/null || true
+    if ! command -v shairport-sync > /dev/null; then
+        say "shairport-sync not installed — AirPlay is off until it is."
+        say "run once over SSH:  sudo apt-get install -y shairport-sync &&"
+        say "                    sudo systemctl disable --now shairport-sync &&"
+        say "                    systemctl --user start musi-airplay"
+        return 0
+    fi
+    systemctl --user restart musi-airplay 2>/dev/null || true
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════

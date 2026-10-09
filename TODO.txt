@@ -318,6 +318,27 @@ DONE
       Navidrome getSimilarSongs (needs its Last.fm agent), unsynced
       suggestions streamed directly; fallback same artist + library spread
 
+[x] AirPlay pack (update.sh step 8)
+    - shairport-sync 4.3.7 from Raspbian trixie = classic AirPlay (no
+      nqptp/AirPlay 2) but WITH D-Bus + MPRIS (checked in the .deb). Runs as
+      user service musi-airplay (pi/musi-airplay.service, ConditionPath
+      on /usr/bin/shairport-sync) with ~/.config/musi/shairport-sync.conf:
+      output "musiout" (router's DAC/BT PCM), session bus, metadata pipe
+    - Hooks (pi/musi-airplay): begin = flag /tmp/musi-airplay + mpc stop
+      (stop, not pause, so MPD releases ALSA); end = remove flag. Router's
+      auto-play skipped while the flag exists
+    - player/airplay.py: metadata pipe reader thread (title/artist/album/
+      PICT/prgr/pfls/prsm), status overlay (path airplay://<n>), MPRIS
+      PlayPause/Next/Previous via busctl, end_session() = restart the
+      receiver (drops the phone) — MusiMPDClient.before_play calls it so
+      playing musi's own music takes the speaker back
+    - Now Playing / mini bar: phone cover + AirPlay tag; seek and heart off.
+      Never scrobbled. Phone volume works; musi's slider stays MPD-only
+    - NEEDS ONE MANUAL STEP on the device (root): apt install shairport-sync
+      + systemctl disable --now shairport-sync. NOTE 2026-10-09: the Pi's apt
+      mirror redirect (raspbian.raspberrypi.com -> mirror.isoc.org.il) was
+      refusing connections; archive.raspbian.org worked
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

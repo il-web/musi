@@ -73,6 +73,10 @@ class App:
         self._remote_meta:     dict[str, dict | None] = {}
         self._last_bg:         float        = 0.0    # last background-jobs tick
         self._last_prefs:      float        = 0.0    # last settings-file check
+        from musi.player import airplay
+        airplay.start_reader()
+        if mpd is not None:
+            mpd.before_play = self._release_airplay
         from musi.player.scrobbler import Scrobbler
         self._scrobbler = Scrobbler()
         # called once, after the first frame reaches the panel (crashguard)
@@ -166,6 +170,12 @@ class App:
 
     def toggle_play(self) -> None:
         """Play/pause with an optimistic local state flip for instant feedback."""
+        from musi.player import airplay
+        if airplay.active():                     # pause/resume the phone itself
+            airplay.command("PlayPause")
+            new_state = "pause" if self._status.state == "play" else "play"
+            self._status = replace(self._status, state=new_state)
+            return
         self._mpd.play_pause()
         if self._status.connected:
             new_state = "pause" if self._status.state == "play" else "play"
@@ -268,6 +278,9 @@ class App:
             # ── poll MPD ──────────────────────────────────────────────────────
             if now - self._last_poll >= POLL_INTERVAL:
                 self._status    = self._mpd.poll()
+                from musi.player import airplay
+                if airplay.active():                 # the phone has the speaker
+                    self._status = airplay.overlay(self._status)
                 self._last_poll = now
                 self._poll_time = now
                 self._maybe_record_play()
@@ -514,6 +527,12 @@ class App:
         if self._status.state == "play" and path and path != self._last_track_path:
             self._mpd.record_play(self._db, path)
             self._last_track_path = path
+
+    def _release_airplay(self) -> None:
+        """musi is about to play its own music: end an AirPlay session first."""
+        from musi.player import airplay
+        if airplay.active():
+            airplay.end_session()
 
     def _background(self, uptime: float) -> None:
         """Once-a-minute housekeeping. Each job decides for itself whether it

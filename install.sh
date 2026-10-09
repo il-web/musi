@@ -92,6 +92,7 @@ sudo apt-get install -y --no-install-recommends \
     libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-mixer-2.0-0 \
     libgl1-mesa-dri libegl1 libgbm1 libgles2 \
     bluez bluez-tools bluez-alsa-utils \
+    shairport-sync \
     plymouth plymouth-themes \
     i2c-tools device-tree-compiler \
     avahi-daemon
@@ -416,13 +417,25 @@ sudo systemctl reload NetworkManager 2>/dev/null || true
 # toggled from Settings -> Power on the device (raspi-config nonint
 # do_overlayfs, allowed via the sudoers rule above) and applies after reboot.
 
+# ── 9b. AirPlay receiver (shairport-sync as a user service) ───────────────────
+# Mirrors update.sh step 8. The package's own system service would run as its
+# own user with the default ALSA device — it can't reach ~/.asoundrc (DAC or
+# Bluetooth) or the session bus, so it is disabled and musi-airplay runs it.
+say "AirPlay receiver"
+sudo systemctl disable --now shairport-sync 2>/dev/null || true
+install -m 0755 "$SCRIPT_DIR/pi/musi-airplay" "$HOME/.local/bin/musi-airplay"
+sed -i 's/\r$//' "$HOME/.local/bin/musi-airplay"
+mkdir -p "$HOME/.config/musi"
+sed "s|@HOME@|$HOME|g" "$SCRIPT_DIR/pi/shairport-sync.conf" > "$HOME/.config/musi/shairport-sync.conf"
+install -m 0644 "$SCRIPT_DIR/pi/musi-airplay.service" "$HOME/.config/systemd/user/musi-airplay.service"
+
 # ── 10. services + autostart ──────────────────────────────────────────────────
 say "Enabling services + autostart"
 install -m 0644 "$SCRIPT_DIR/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"
 install -m 0644 "$SCRIPT_DIR/pi/musi-api.service" "$HOME/.config/systemd/user/musi-api.service"
 loginctl enable-linger "$USER_NAME" 2>/dev/null || true
 systemctl --user daemon-reload
-systemctl --user enable mpd musi-bt-router mpris-proxy mpdris2 musi-ui musi-api 2>/dev/null || true
+systemctl --user enable mpd musi-bt-router mpris-proxy mpdris2 musi-ui musi-api musi-airplay 2>/dev/null || true
 sudo hostnamectl set-hostname musi 2>/dev/null || true
 sudo systemctl enable --now avahi-daemon 2>/dev/null || true
 

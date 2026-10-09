@@ -1,0 +1,16 @@
+[Unit]
+Description=musi AirPlay receiver (shairport-sync)
+# Runs as the musi user, not the package's system service: it has to reach
+# the user's ~/.asoundrc output (DAC or Bluetooth) and session bus.
+After=mpd.service
+# Installed before the package may be: start once shairport-sync exists (the
+# next boot after "apt-get install shairport-sync" picks it up on its own).
+ConditionPathExists=/usr/bin/shairport-sync
+
+[Service]
+ExecStart=/usr/bin/shairport-sync -c %h/.config/musi/shairport-sync.conf
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -49,8 +49,8 @@ class Scrobbler:
         now = time.monotonic() if now is None else now
         wall = time.time() if wall is None else wall
         path = status.path if getattr(status, "connected", True) else None
-        if remote.is_radio(path):
-            path = None         # radio never counts as a listen (by choice)
+        if remote.kind(path) in ("radio", "airplay"):
+            path = None         # radio: by choice; AirPlay: the phone's app scrobbles
         playing = status.state == "play" and bool(path)
         elapsed = float(getattr(status, "elapsed", 0.0) or 0.0)
 

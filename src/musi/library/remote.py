@@ -39,7 +39,10 @@ def song_id(path: "str | None") -> str | None:
 
 def kind(path: "str | None") -> str:
     """'server' (a music-server song), 'radio' (any other stream — musi only
-    hands MPD other URLs for internet radio), or 'local'."""
+    hands MPD other URLs for internet radio), 'airplay' (the phone, see
+    player/airplay.py), or 'local'."""
+    if isinstance(path, str) and path.startswith("airplay://"):
+        return "airplay"
     if not is_remote(path):
         return "local"
     return "server" if path.startswith(STREAM_PREFIX) else "radio"

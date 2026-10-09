@@ -76,13 +76,23 @@ def _reload_art(app, status) -> None:
     global _art, _accent, _cached_path, _logo_retry
     if status.path == _cached_path:
         if _logo_retry and time.monotonic() >= _logo_retry:
-            _radio_art(status.path)             # the logo may have landed
+            if remote.kind(status.path) == "airplay":
+                from musi.player import airplay
+                _art = airplay.cover((32, 32))
+                _logo_retry = time.monotonic() + 1.0 if _art is None else 0.0
+            else:
+                _radio_art(status.path)         # the logo may have landed
         return
     _cached_path = status.path
     _art, _accent = None, theme.ACCENT
     _logo_retry = 0.0
     if remote.is_radio(status.path):
         _radio_art(status.path)
+        return
+    if remote.kind(status.path) == "airplay":
+        from musi.player import airplay
+        _art = airplay.cover((32, 32))
+        _logo_retry = time.monotonic() + 1.0 if _art is None else 0.0
         return
     if not status.path or app.db is None:
         return
@@ -116,13 +126,15 @@ def _update_text(status) -> None:
     key   = (title, kind)
     if key != _prev_title:
         _prev_title = key
-        tagged = kind in ("server", "radio")
+        tagged = kind in ("server", "radio", "airplay")
         _title_surf = theme.render(title, 12, theme.WHITE, bold=True,
                                    max_width=224 - (icons.CLOUD_W if tagged else 0))
         if kind == "server":
             _title_surf = icons.with_cloud(_title_surf, theme.DIM)
         elif kind == "radio":
             _title_surf = icons.with_radio(_title_surf, theme.DIM)
+        elif kind == "airplay":
+            _title_surf = icons.with_airplay(_title_surf, theme.DIM)
     if meta != _prev_meta:
         _prev_meta = meta
         _meta_surf = theme.render(meta, 10, theme.DIM, max_width=224)

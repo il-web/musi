@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# shairport-sync session hooks (see pi/shairport-sync.conf).
+#
+#   begin — the phone is about to play: stop MPD so the shared audio output
+#           is free, and raise the flag the musi UI watches.
+#   end   — the phone stopped: drop the flag; musi goes back to MPD.
+#
+# MPD is *stopped*, not paused: a paused MPD can keep the ALSA device open,
+# and then shairport-sync couldn't. The queue and current song are kept.
+set -u
+FLAG=/tmp/musi-airplay
+
+case "${1:-}" in
+  begin)
+    date +%s > "$FLAG"
+    mpc -q stop 2>/dev/null || true
+    ;;
+  end)
+    rm -f "$FLAG"
+    ;;
+esac
+exit 0

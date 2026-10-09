@@ -11,7 +11,8 @@ import json
 import time
 
 from musi.library import radio, remote
-from musi.player import art_cache, audio_detect, icons, motion, radio_play, statusbar, theme
+from musi.player import (airplay, art_cache, audio_detect, icons, motion, radio_play,
+                         statusbar, theme)
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -99,6 +100,7 @@ class NowPlayingScreen(Screen):
         self._station:   dict | None = None
         self._logo_wait: float = 0.0
         self._radio_msg: str = ""
+        self._air_rev:   int = -1             # AirPlay cover version shown
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -120,6 +122,9 @@ class NowPlayingScreen(Screen):
         self._reload_art(status)
         if self._logo_wait and time.monotonic() >= self._logo_wait:
             self._load_radio_art()              # did the logo land yet?
+        if remote.kind(status.path) == "airplay" and \
+                airplay.snapshot()["art_rev"] != self._air_rev:
+            self._load_airplay_art()            # the cover arrived after the title
         self._reload_fav(status)
         self._update_text_cache(status)
         live = remote.is_radio(status.path)
@@ -259,7 +264,9 @@ class NowPlayingScreen(Screen):
     def on_press(self, x: int, y: int) -> bool:
         # seek: grab anywhere on/near the progress bar (tap or scrub)
         if BAR_Y - 14 <= y <= BAR_Y + 16 and BAR_X - 10 <= x <= BAR_X + BAR_W + 10:
-            if self.app.status.duration > 0:
+            # the phone's stream can't be seeked from here
+            if self.app.status.duration > 0 and \
+                    remote.kind(self.app.status.path) != "airplay":
                 self._drag_seek = self._seek_frac_from_x(x)
                 return True
             return False
@@ -299,8 +306,8 @@ class NowPlayingScreen(Screen):
     def _toggle_favorite(self) -> None:
         """Add/remove the current track in the Favourites playlist."""
         path = self.app.status.path
-        if not path:
-            return
+        if not path or remote.kind(path) == "airplay":
+            return                          # not in musi's library to favourite
         if remote.is_radio(path):
             st = radio.station_for(path)
             if st:
@@ -335,6 +342,10 @@ class NowPlayingScreen(Screen):
             self._start_ripple(_TRANSPORT_X[button], CTRL_Y)
         if button in (Button.NEXT, Button.PREV):
             self._next_dir = 1 if button == Button.NEXT else -1
+        if button in (Button.NEXT, Button.PREV) and remote.kind(status.path) == "airplay":
+            airplay.command("Next" if button == Button.NEXT else "Previous")
+            self._next_dir = 1 if button == Button.NEXT else -1
+            return
         if button in (Button.NEXT, Button.PREV) and remote.is_radio(status.path):
             # radio has no track list: skip through the saved stations instead
             self._radio_msg = "Tuning in…"
@@ -372,6 +383,9 @@ class NowPlayingScreen(Screen):
             self._station = radio.station_for(status.path)
             self._load_radio_art()
             return
+        if remote.kind(status.path) == "airplay":
+            self._load_airplay_art()
+            return
         if not status.path or self.app.db is None:
             return
 
@@ -393,6 +407,15 @@ class NowPlayingScreen(Screen):
         pending = not path and bool(st.get("image"))
         self._logo_wait = time.monotonic() + 1.0 if pending else 0.0
 
+    def _load_airplay_art(self) -> None:
+        """The phone's cover — it can arrive a moment after the title, so
+        draw() calls this again whenever a newer one lands."""
+        self._air_rev = airplay.snapshot()["art_rev"]
+        self._art = airplay.cover((320, 320))
+        if self._art is not None:
+            avg = pygame.transform.average_color(self._art)[:3]
+            self._accent = theme.brighten(avg, 1.6) if sum(avg) < 300 else avg
+
     def _reload_fav(self, status: PlayerStatus) -> None:
         """Refresh the heart state when the track changes (one MPD call)."""
         if status.path == self._fav_path:
@@ -410,7 +433,7 @@ class NowPlayingScreen(Screen):
         meta  = f"{status.artist}" + (f"  ·  {status.album}" if status.album else "")
         kind  = remote.kind(status.path)
         key   = (title, kind)      # same title, other source
-        tagged = kind in ("server", "radio")
+        tagged = kind in ("server", "radio", "airplay")
 
         if key != self._prev_title:
             self._prev_title  = key
@@ -422,6 +445,8 @@ class NowPlayingScreen(Screen):
                 self._title_surf = icons.with_cloud(self._title_surf, theme.WHITE)
             elif kind == "radio":
                 self._title_surf = icons.with_radio(self._title_surf, theme.WHITE)
+            elif kind == "airplay":
+                self._title_surf = icons.with_airplay(self._title_surf, theme.WHITE)
 
         if meta != self._prev_meta:
             self._prev_meta  = meta
