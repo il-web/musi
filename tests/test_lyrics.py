@@ -199,3 +199,77 @@ def test_no_request_without_artist_or_title(tmp_path):
                         get=lambda url, **kw: calls.append(url))
     assert calls == []
     assert res.found is False
+
+
+# ── Lyricsfile (word timing) ──────────────────────────────────────────────────
+
+_LYRICSFILE = """version: '1.0'
+lines:
+  - text: 'Stay until the morning'
+    start_ms: 4200
+    end_ms: 6800
+    words:
+      - text: 'Stay '
+        start_ms: 4200
+        end_ms: 4800
+      - text: 'until '
+        start_ms: 4800
+      - text: 'morning'
+        start_ms: 5750
+  - text: 'Second line'
+    start_ms: 7000
+"""
+
+
+def test_lyricsfile_words_get_their_ends_filled_in():
+    lines = ly.parse_lyricsfile(_LYRICSFILE)
+    assert [(w.text, w.start, w.end) for w in lines[0].words] == [
+        ("Stay ", 4.2, 4.8), ("until ", 4.8, 5.75), ("morning", 5.75, 6.8)]
+    assert lines[1].words == [] and lines[1].start == 7.0
+
+
+def test_junk_lyricsfile_falls_back_to_nothing():
+    assert ly.parse_lyricsfile("::: not yaml [") == []
+    assert ly.parse_lyricsfile("version: '1.0'") == []
+
+
+def test_a_word_synced_payload_is_word_synced(tmp_path):
+    def fake_get(url, **kw):
+        return json.dumps({"syncedLyrics": _LRC, "plainLyrics": "",
+                           "lyricsfile": _LYRICSFILE}).encode()
+    res = ly.get_lyrics(tmp_path, "Band", "Song", "Album", 90.0, get=fake_get)
+    assert res.word_synced and res.synced
+    assert res.lines[0] == (4.2, "Stay until the morning")   # lyricsfile wins
+
+
+def test_line_only_lyrics_get_line_ends_from_the_next_line(tmp_path):
+    def fake_get(url, **kw):
+        return json.dumps({"syncedLyrics": _LRC, "plainLyrics": ""}).encode()
+    res = ly.get_lyrics(tmp_path, "Band", "Song", "Album", 90.0, get=fake_get)
+    assert not res.word_synced
+    assert res.timed[0].end == res.timed[1].start
+
+
+def test_an_old_cache_entry_is_refetched_once_for_the_lyricsfile(tmp_path):
+    path = ly.cache_path(tmp_path, "Band", "Song")
+    path.write_text(json.dumps({"synced": _LRC, "plain": "", "instrumental": False}))
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+        return json.dumps({"syncedLyrics": _LRC, "lyricsfile": _LYRICSFILE}).encode()
+
+    assert ly.get_lyrics(tmp_path, "Band", "Song", "A", 90.0, get=fake_get).word_synced
+    ly.get_lyrics(tmp_path, "Band", "Song", "A", 90.0, get=fake_get)
+    assert len(calls) == 1                         # upgraded, then cached
+
+
+def test_offline_upgrade_keeps_the_old_cache(tmp_path):
+    path = ly.cache_path(tmp_path, "Band", "Song")
+    path.write_text(json.dumps({"synced": _LRC, "plain": "", "instrumental": False}))
+
+    def offline(url, **kw):
+        raise OSError("no route")
+
+    res = ly.get_lyrics(tmp_path, "Band", "Song", "A", 90.0, get=offline)
+    assert res.found and res.synced and not res.error

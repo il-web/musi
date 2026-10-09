@@ -263,6 +263,22 @@ DONE
       OTA pip step fails it degrades to the old mirrored text, never crashes)
     - Verified from the Pi: GLGLZ + Radios 100FM stream MP3 with ICY titles
 
+[x] Lyrics pack 2 (Apple Music style + word sync)
+    - LRCLIB's Lyricsfile (YAML, lrclib.net/lyricsfile; API field
+      "lyricsfile", flag "hasWordSync"): line start/end + per-word timing
+      where someone has timed it. PyYAML new dep. Cache payload v2 — older
+      entries re-fetched once (old cache kept if offline). NOTE: word sync on
+      LRCLIB is new/community-made; none of 10 popular songs had it
+      (2026-10-09), so most songs light line by line for now. NetEase (yrc,
+      unofficial) was evaluated as an extra word source and NOT used
+    - Screen rewrite: blurred album backdrop (darkened), small art+title
+      header, 20px bold left-aligned lines (Hebrew right-aligned), current
+      line bright, eased glide to keep it near the top third, word fill via
+      clipped blit of pre-rendered bright word, "• • •" breathing dots for
+      instrumental breaks, drag to read ahead (snaps back after 3 s), tap to
+      seek. Full FPS only while easing / filling words / dots
+    - theme.is_rtl(); Pi-safe drawing (no per-frame scaling or alpha layers)
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

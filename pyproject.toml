@@ -16,6 +16,7 @@ dependencies = [
     "segno>=1.6.0",
     "waitress>=3.0.0",
     "python-bidi>=0.6",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

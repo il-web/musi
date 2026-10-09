@@ -341,3 +341,84 @@ def test_stopping_playback_does_not_clear_the_lyrics(tmp_path, monkeypatch):
     s.draw(pygame.Surface((320, 480)), Empty())
     assert s.result.found is True
     assert s.title == "Song"
+
+
+# ── Apple-style motion, word fill, breaks, RTL ────────────────────────────────
+
+from musi.library.lyrics import Line, Word  # noqa: E402
+
+
+def _words_result():
+    timed = [Line(0.0, 2.0, "One two", [Word(0.0, 1.0, "One "), Word(1.0, 2.0, "two")]),
+             Line(2.0, 9.0, "♪"),
+             Line(9.0, 12.0, "after the break")]
+    return Lyrics(lines=[(l.start, l.text) for l in timed], synced=True, found=True,
+                  timed=timed, word_synced=True)
+
+
+class _Spy(pygame.Surface):
+    def __init__(self):
+        super().__init__((320, 480))
+        self.partial = []
+
+    def blit(self, src, dest, area=None, *a, **k):
+        if area is not None and area.w < src.get_width():
+            self.partial.append(area.w / src.get_width())
+        return super().blit(src, dest, area, *a, **k)
+
+
+def test_the_current_word_fills_partway(tmp_path, monkeypatch):
+    s = _screen(tmp_path, monkeypatch, _words_result())
+    s.on_enter(); s.join()
+    st = St(); st.elapsed = 1.5                     # halfway through "two"
+    surf = _Spy()
+    s.draw(surf, st)
+    assert any(0.3 < f < 0.7 for f in surf.partial)
+    assert s.animates                               # word fill runs at full FPS
+
+
+def test_an_instrumental_break_shows_dots_not_text(tmp_path, monkeypatch):
+    s = _screen(tmp_path, monkeypatch, _words_result())
+    s.on_enter(); s.join()
+    s._ensure_layout()
+    assert s._layout[1].gap and s._layout[1].rows == []
+
+
+def test_the_view_glides_rather_than_jumps(tmp_path, monkeypatch):
+    s = _screen(tmp_path, monkeypatch, _synced())
+    s.on_enter(); s.join()
+    st = St(); st.elapsed = 0.0
+    surf = pygame.Surface((320, 480))
+    s.draw(surf, st); s._last_t -= 1                # settle on line 0
+    s.draw(surf, st)
+    st.elapsed = 30.0                               # far ahead
+    s._last_t -= 0.03
+    before = s._view
+    s.draw(surf, st)
+    target = s._layout[7].top - (ls.FOCUS_Y - ls.VIEW_TOP)
+    assert before < s._view < target and s.animates
+
+
+def test_dragging_pauses_following_then_it_resumes(tmp_path, monkeypatch):
+    s = _screen(tmp_path, monkeypatch, _synced())
+    s.on_enter(); s.join()
+    surf = pygame.Surface((320, 480))
+    st = St(); st.elapsed = 0.0
+    s.draw(surf, st)
+    s.handle_scroll(-120)                           # read ahead
+    held = s._view
+    s._last_t -= 0.5
+    s.draw(surf, st)
+    assert s._view == held                          # not yanked back
+    s._manual_until = 0.0                           # …a few seconds later
+    s._last_t -= 1
+    s.draw(surf, st)
+    assert s._view != held
+
+
+def test_hebrew_lines_are_right_aligned(tmp_path, monkeypatch):
+    heb = "אני בא"
+    s = _screen(tmp_path, monkeypatch, Lyrics(lines=[(0.0, heb)], synced=True, found=True))
+    s.on_enter(); s.join()
+    s._ensure_layout()
+    assert s._layout[0].rtl

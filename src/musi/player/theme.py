@@ -89,6 +89,11 @@ except ImportError:                      # older python-bidi, or not installed
         _get_display = None
 
 
+def is_rtl(text: str) -> bool:
+    """Contains right-to-left script — such lines are right-aligned."""
+    return bool(text) and bool(_RTL.search(text))
+
+
 def visual(text: str) -> str:
     """``text`` in display order (a no-op for left-to-right text)."""
     if not text or _get_display is None or not _RTL.search(text):
