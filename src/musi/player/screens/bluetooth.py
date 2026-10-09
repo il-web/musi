@@ -35,6 +35,10 @@ USER_DISCONNECT_FLAG = "/tmp/musi-bt-user-disconnect"
 CONNECT_ATTEMPTS = 3     # speakers fresh out of power-on often fail the first try
 CONNECT_RETRY_S  = 2.0
 
+SCAN_S          = 12     # discovery length
+SCAN_REFRESH_S  = 2.5    # how often the list refreshes while scanning
+MAX_INFO_PROBES = 15     # unnamed devices checked per refresh (one call each)
+
 
 @dataclass
 class _Device:
@@ -53,6 +57,7 @@ class BluetoothScreen(ListScreen):
         self._action_msg: str  = ""     # "Connecting…", "Connected", etc.
         self._busy:       bool = False  # block input while an action runs
         self._scanning:   bool = False  # discovery in progress
+        self._audio_seen: dict[str, bool] = {}   # mac → audio? (unnamed devices)
 
         # static surfaces
         self._header_surf: pygame.Surface | None = None
@@ -182,20 +187,55 @@ class BluetoothScreen(ListScreen):
         threading.Thread(target=self._scan_thread, daemon=True).start()
 
     def _scan_thread(self) -> None:
+        """Discover for SCAN_S seconds, refreshing the list as devices appear.
+
+        A discovery left running by a crashed client, or wedged in the Pi 3's
+        combo chip, makes every new scan fail with org.bluez.Error.InProgress.
+        Recovery escalates: stop that scan and retry, then power-cycle the
+        radio and retry. Whatever still fails is shown, not swallowed.
+        """
         try:
-            subprocess.run(
-                ["bluetoothctl", "power", "on"],
-                capture_output=True, timeout=6,
-            )
-            subprocess.run(
-                ["bluetoothctl", "--timeout", "10", "scan", "on"],
-                capture_output=True, text=True, timeout=15,
-            )
-        except Exception:
-            import logging
-            logging.warning('Ignored exception', exc_info=True)
-        self._scanning = False
+            _bt("power", "on")
+            err = self._run_scan()
+            if err and "InProgress" in err:
+                self._action_msg = "Clearing a stuck scan…"
+                _bt("scan", "off")
+                err = self._run_scan()
+            if err and "InProgress" in err:
+                self._action_msg = "Restarting the Bluetooth radio…"
+                _bt("power", "off")
+                time.sleep(1.5)
+                _bt("power", "on")
+                err = self._run_scan()
+            self._action_msg = f"Scan failed: {_short(err)}" if err else ""
+        except FileNotFoundError:
+            self._info_msg = "bluetoothctl not found — install bluez."
+        except Exception as exc:
+            self._action_msg = f"Scan failed: {exc}"
+        finally:
+            self._scanning = False
         self._fetch()
+
+    def _run_scan(self) -> str:
+        """One discovery run. Returns '' on success, else bluetoothctl's error.
+
+        bluetoothctl exits at once when discovery can't start, and otherwise
+        keeps scanning until --timeout — so a quick exit means failure.
+        """
+        proc = subprocess.Popen(
+            ["bluetoothctl", "--timeout", str(SCAN_S), "scan", "on"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        deadline = time.monotonic() + SCAN_S + 5
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(SCAN_REFRESH_S)
+            self._fetch()                       # devices appear as they're found
+        if proc.poll() is None:
+            proc.kill()
+        out = proc.communicate()[0] or ""
+        # "Failed to start discovery: org.bluez.Error.InProgress" — matched on
+        # the prefix, so a device *named* "Error" can't look like a failure
+        failed = [ln for ln in out.splitlines() if ln.strip().startswith("Failed to")]
+        return failed[-1].strip() if failed else ""
 
     def _fetch(self) -> None:
         if sys.platform == "win32":
@@ -221,12 +261,24 @@ class BluetoothScreen(ListScreen):
                 _Device(mac=mac, name=name, paired=True, connected=self._is_connected(mac))
             )
 
-        # then nearby unpaired devices that actually have a name
+        # then nearby unpaired devices: named ones, plus unnamed ones that say
+        # they're audio. Headphones (AirPods especially) are often seen before
+        # their name resolves; other nameless devices are beacons — skip those.
+        probes = 0
         for mac, name in nearby:
             if mac in paired_macs:
                 continue
-            if name.replace(":", "").replace("-", "") == mac.replace(":", ""):
-                continue   # no friendly name — skip noise
+            if _is_bare_address(name, mac):
+                # a busy street has dozens of nameless beacons: ask about each
+                # address once, not on every refresh
+                if mac not in self._audio_seen:
+                    if probes >= MAX_INFO_PROBES:
+                        continue
+                    probes += 1
+                    self._audio_seen[mac] = self._is_audio(mac)
+                if not self._audio_seen[mac]:
+                    continue
+                name = f"Audio device · {mac[-5:]}"
             devices.append(_Device(mac=mac, name=name, paired=False, connected=False))
 
         self._devices  = devices
@@ -246,6 +298,14 @@ class BluetoothScreen(ListScreen):
                 name = parts[2] if len(parts) == 3 else mac
                 out.append((mac, name))
         return out
+
+    def _is_audio(self, mac: str) -> bool:
+        try:
+            r = subprocess.run(["bluetoothctl", "info", mac],
+                               capture_output=True, text=True, timeout=4)
+        except Exception:
+            return False
+        return _looks_like_audio(r.stdout)
 
     def _is_connected(self, mac: str) -> bool:
         try:
@@ -355,4 +415,24 @@ class BluetoothScreen(ListScreen):
         return dev.connected
 
 
+# ── helpers ───────────────────────────────────────────────────────────────────
 
+def _bt(*args: str) -> None:
+    subprocess.run(["bluetoothctl", *args], capture_output=True, timeout=8)
+
+
+def _is_bare_address(name: str, mac: str) -> bool:
+    """bluez names an unnamed device after its address (AA-BB-… or AA:BB:…)."""
+    return name.replace(":", "").replace("-", "").upper() == mac.replace(":", "").upper()
+
+
+def _looks_like_audio(info: str) -> bool:
+    """From `bluetoothctl info`: an audio icon, or an A2DP sink / headset UUID."""
+    return ("Icon: audio-" in info or "Audio Sink" in info
+            or "Headset" in info or "Handsfree" in info)
+
+
+def _short(err: str) -> str:
+    """'Failed to start discovery: org.bluez.Error.InProgress' → 'InProgress'."""
+    tail = err.rsplit("org.bluez.Error.", 1)
+    return tail[1] if len(tail) == 2 else err

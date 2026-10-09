@@ -227,6 +227,22 @@ DONE
     - First update that can be rolled back is the one AFTER this pack
       (the pull that installs it still runs the old updater)
 
+[x] Listening pack
+    - Music server: background sync every 6 h (player's once-a-minute
+      _background tick; 2 min after boot at the earliest, failures retry
+      after 30 min, skipped under storage lock, worker at nice 10)
+    - Settings -> Playback = Crossfade / Volume leveling (ReplayGain, MPD
+      "auto") switches + ListenBrainz row. Both switches re-applied at boot
+    - player/scrobbler.py: real listening time, half-or-4-min rule, repeat-
+      one counted. ListenBrainz: token validated, playing_now, on-disk queue
+      flushed in the background (offline plays survive). Navidrome gets
+      now-playing at start, scrobble only when the play counts
+    - NOTE: if Navidrome itself forwards to ListenBrainz, server tracks would
+      be counted twice — use one or the other
+    - Bluetooth scan: live results, InProgress recovery (scan off -> retry ->
+      radio power-cycle -> retry), errors shown, unnamed audio devices listed
+      ("Audio device · EE:FF"), each unnamed address probed once
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
