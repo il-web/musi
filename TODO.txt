@@ -399,6 +399,13 @@ went live. The API is LAN-only until something replaces it.
     docs/tunnel-setup.md, and the _via_tunnel() CF-header backstop in
     api/server.py. update.sh keeps LATEST_STEP=3 so the retired number is
     never reused — the next pack is step 4.
+    CORRECTION 2026-10-09: the connector was NOT gone from the device —
+    cloudflared.service was enabled and running with a tunnel token in its
+    unit file. Removed by hand over SSH that day: service stopped/disabled,
+    unit deleted, package purged, /usr/local/bin copy, apt source and key
+    removed, token lines dropped from ~/.bash_history. The token was never
+    in this repo. The tunnel still exists in the Cloudflare account until
+    deleted there (Zero Trust -> Networks -> Tunnels).
     KEPT from that pack (not tunnel-specific):
     - CORS origins also read from ~/.local/share/musi/api-origins (one per
       line, read at service start) — site domain changes need no code edit
