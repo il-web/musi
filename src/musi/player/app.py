@@ -17,7 +17,7 @@ from musi.player.input import Button, key_to_button
 from musi.player.gestures import EDGE_W, resolve_edge_swipe
 from musi.player.mpd_client import MusiMPDClient, PlayerStatus
 from musi.player.screen import Screen
-from musi.player.transition import Transition
+from musi.player.transition import InteractivePop, Transition
 
 # ── constants ─────────────────────────────────────────────────────────────────
 DISPLAY_W, DISPLAY_H = 320, 480   # matches ST7796 — draw at this resolution
@@ -28,6 +28,7 @@ OFF_FPS         = 5               # screen off — just watch for the wake tap
 ACTIVE_WINDOW_S = 1.5             # stay at full FPS this long after the last input
 POLL_INTERVAL   = 1.0             # seconds between MPD status polls
 TAP_SLOP_PX     = 12              # movement below this still counts as a tap
+EDGE_FOLLOW_PX  = 12              # edge drag this far right → page starts following
 LONG_PRESS_S    = 0.5             # hold this long without moving → long-press
 
 # Screen dims after MUSI_DIM_S and blanks (backlight off) after MUSI_OFF_S
@@ -68,6 +69,8 @@ class App:
         self._last_track_path: str | None   = None
         self._sleep_at:        float | None = None   # sleep timer deadline (ticks s)
         self._transition:      Transition | None = None
+        self._interactive:     InteractivePop | None = None   # finger-driven pop
+        self._quiet_pop:       bool = False   # pop without its own transition
         self._frame_no:        int          = 0      # frames drawn — see _begin_transition
         self._frame:           pygame.Surface | None = None   # offscreen, for transitions
         self._remote_meta:     dict[str, dict | None] = {}
@@ -117,6 +120,52 @@ class App:
     def transitioning(self) -> bool:
         return self._transition is not None
 
+    # ── finger-driven pops (edge back swipe, Now Playing drag-down) ──────────
+
+    def begin_interactive_pop(self, axis: str) -> bool:
+        """Start a pop that follows the finger. ``axis`` "x" = back swipe,
+        "y" = drag a sheet (Now Playing) down. False if it can't run here —
+        the caller then falls back to an ordinary go_back()."""
+        if (self._interactive is not None or len(self._stack) < 2
+                or not self._running or not motion.enabled()):
+            return False
+        display = pygame.display.get_surface()
+        if display is None:
+            return False
+        under = pygame.Surface(display.get_size()).convert()
+        under.fill((10, 10, 15))
+        try:
+            self._stack[-2].draw(under, self._status)   # the page that'll show
+        except Exception:
+            logging.warning("could not draw the page beneath", exc_info=True)
+            return False
+        self._transition = None
+        self._interactive = InteractivePop(axis, under, display.copy())
+        return True
+
+    def drag_interactive_pop(self, offset: float) -> None:
+        if self._interactive is not None and self._interactive.committed is None:
+            self._interactive.drag(offset)
+
+    def end_interactive_pop(self) -> None:
+        """Finger up: finish the pop or spring back. The stack changes now;
+        the animation plays on from the snapshots."""
+        ip = self._interactive
+        if ip is None or ip.committed is not None:
+            return
+        if ip.release():
+            self._quiet_pop = True
+            try:
+                self._stack[-1].go_back()
+            finally:
+                self._quiet_pop = False
+
+    def _can_swipe_back(self) -> bool:
+        """The finger-following back swipe only replaces a plain pop: screens
+        with their own go_back (unwinding a sub-step) keep the old behaviour."""
+        top = self._stack[-1] if self._stack else None
+        return top is not None and type(top).go_back is Screen.go_back
+
     def _begin_transition(self, kind: str, forward: bool) -> None:
         """Snapshot the frame on the panel and animate away from it.
 
@@ -124,7 +173,7 @@ class App:
         then pushes) become one transition: the snapshot is still what the
         user was looking at, and the last call decides the kind.
         """
-        if not self._running or not motion.enabled():
+        if not self._running or not motion.enabled() or self._quiet_pop:
             return
         t = self._transition
         if t is not None and t.frame_no == self._frame_no:
@@ -429,6 +478,7 @@ class App:
                 or self._captured
                 or self._touch_start is not None
                 or self._transition is not None
+                or self._interactive is not None
             )
             clock.tick(
                 ACTIVE_FPS if (interacting or top_animates or self._bt_active)
@@ -448,6 +498,13 @@ class App:
         the transition snapshot taken at that moment must be the frame the
         user saw, not a half-redrawn one. The extra copy is one 320×480 blit.
         """
+        ip = self._interactive
+        if ip is not None:
+            if ip.finished():
+                self._interactive = ip = None
+            else:
+                ip.compose(surface)              # snapshots only, no screen draw
+                return
         if self._frame is None:
             self._frame = pygame.Surface(surface.get_size()).convert()
         t = self._transition
@@ -493,9 +550,21 @@ class App:
         if self._captured:
             self._stack[-1].on_drag(x, y)
             return
+        if self._edge_live and self._interactive is not None and \
+                self._interactive.committed is None:
+            self._edge_dx += dx
+            self.drag_interactive_pop(self._edge_dx)       # the page follows
+            return
         if self._edge_live and not self._edge_fired:
             self._edge_dx += dx
             self._edge_dy += dy
+            if (self._edge_dx >= EDGE_FOLLOW_PX
+                    and self._edge_dx > abs(self._edge_dy) * 1.5
+                    and self._can_swipe_back()
+                    and self.begin_interactive_pop("x")):
+                self._edge_fired = True
+                self.drag_interactive_pop(self._edge_dx)
+                return
             if resolve_edge_swipe(self._touch_start[0], self._edge_dx, self._edge_dy):
                 self._edge_fired = True
                 self._stack[-1].go_back()
@@ -505,6 +574,8 @@ class App:
         self._stack[-1].handle_scroll(dy)
 
     def _end_touch(self, x: int, y: int) -> None:
+        if self._edge_live and self._interactive is not None:
+            self.end_interactive_pop()                     # finish or spring back
         if self._touch_start is not None and self._stack and not self._edge_fired:
             scr = self._stack[-1]
             if self._captured:

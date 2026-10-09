@@ -140,3 +140,73 @@ def _shade_over(out: pygame.Surface, alpha: float) -> None:
         sh = _shade_surf()
         sh.set_alpha(int(alpha))
         out.blit(sh, (0, 0))
+
+
+# ── interactive pop: the page follows the finger ──────────────────────────────
+
+class InteractivePop:
+    """A pop driven by a finger instead of a clock.
+
+    axis "x": the left-edge back swipe — the page slides right, the one
+    beneath drifts in from the left under a fading shade (like "slide").
+    axis "y": dragging Now Playing down — it slides off the bottom ("sheet").
+
+    While the finger is down, offset() is wherever the finger put it. On
+    release it eases on to the end (commit — the app pops) or back to zero
+    (cancel). Both pages are snapshots, so a frame costs a few blits.
+    """
+
+    COMMIT_FRAC = 0.33        # past a third of the way, letting go completes it
+    FLING_PX_S  = 700.0       # …or a fast flick in the right direction
+
+    def __init__(self, axis: str, under: pygame.Surface, over: pygame.Surface) -> None:
+        self.axis = axis
+        self.under, self.over = under, over
+        self.span = W if axis == "x" else H
+        self._offset = 0.0
+        self._from = self._to = 0.0
+        self._tween: motion.Tween | None = None
+        self.committed: bool | None = None       # None while the finger is down
+        self._samples: list[tuple[float, float]] = []
+
+    # finger
+    def drag(self, offset: float, now: float | None = None) -> None:
+        import time
+        now = time.monotonic() if now is None else now
+        self._offset = max(0.0, min(self.span, offset))
+        self._samples = (self._samples + [(now, self._offset)])[-5:]
+
+    def release(self, now: float | None = None) -> bool:
+        """Decide and start the settle animation. Returns True to commit."""
+        import time
+        now = time.monotonic() if now is None else now
+        speed = 0.0
+        if len(self._samples) >= 2:
+            (t0, o0), (t1, o1) = self._samples[0], self._samples[-1]
+            if t1 - t0 > 0.005:
+                speed = (o1 - o0) / (t1 - t0)
+        commit = (self._offset >= self.span * self.COMMIT_FRAC
+                  or (speed >= self.FLING_PX_S and self._offset > 24))
+        self.committed = commit
+        self._from, self._to = self._offset, (self.span if commit else 0.0)
+        remaining = abs(self._to - self._from) / self.span
+        self._tween = motion.Tween(max(0.08, 0.26 * remaining))
+        self._tween.start(now)
+        return commit
+
+    def offset(self, now: float | None = None) -> float:
+        if self._tween is None:
+            return self._offset
+        p = motion.ease_out_cubic(self._tween.progress(now))
+        return motion.lerp(self._from, self._to, p)
+
+    def finished(self, now: float | None = None) -> bool:
+        return self._tween is not None and not self._tween.active(now)
+
+    def compose(self, out: pygame.Surface, now: float | None = None) -> None:
+        shown = 1.0 - self.offset(now) / self.span      # how much `over` still covers
+        t = Transition.__new__(Transition)               # reuse the kinds' drawing
+        if self.axis == "x":
+            t._slide(out, self.under, self.over, shown)
+        else:
+            t._sheet(out, self.under, self.over, shown)

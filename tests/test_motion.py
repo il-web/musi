@@ -336,3 +336,74 @@ def test_slide_edge_shadow_lands_on_an_even_column():
         out = _RecordingSurface((320, 480))
         t.compose(out, new, now=transition.DURATIONS["slide"] * frac)
         assert all(x % 2 == 0 for _, x in out.alpha_blits), out.alpha_blits
+
+
+# ── finger-driven pops ────────────────────────────────────────────────────────
+
+from musi.player.transition import InteractivePop  # noqa: E402
+
+
+def _ip(axis="x"):
+    return InteractivePop(axis, _solid(BLUE), _solid(RED))
+
+
+def test_letting_go_past_a_third_completes_the_pop():
+    ip = _ip()
+    ip.drag(40, now=0.0)
+    ip.drag(130, now=1.0)                           # slow, but past 1/3 of 320
+    assert ip.release(now=1.0) is True
+    assert ip.offset(now=5.0) == 320 and ip.finished(now=5.0)
+
+
+def test_a_short_slow_drag_springs_back():
+    ip = _ip()
+    ip.drag(20, now=0.0)
+    ip.drag(60, now=1.0)
+    assert ip.release(now=1.0) is False
+    assert ip.offset(now=5.0) == 0
+
+
+def test_a_fast_flick_completes_even_when_short():
+    ip = _ip()
+    ip.drag(10, now=0.00)
+    ip.drag(60, now=0.05)                           # 1000 px/s
+    assert ip.release(now=0.05) is True
+
+
+def test_the_page_follows_the_finger_while_held():
+    ip = _ip()
+    ip.drag(100, now=0.0)
+    out = pygame.Surface((320, 480)).convert()
+    ip.compose(out, now=0.0)
+    assert out.get_at((50, 240))[:3] != RED          # left of the finger: page beneath
+    assert out.get_at((200, 240))[:3] == RED         # right of it: the page leaving
+
+
+def test_dragging_a_sheet_down_moves_it_down():
+    ip = _ip("y")
+    ip.drag(240, now=0.0)
+    out = pygame.Surface((320, 480)).convert()
+    ip.compose(out, now=0.0)
+    assert out.get_at((160, 100))[:3] != RED and out.get_at((160, 400))[:3] == RED
+
+
+def test_committing_pops_once_without_a_second_transition(tmp_path):
+    a = _running_app(tmp_path, depth=2)
+    assert a.begin_interactive_pop("x")
+    a.drag_interactive_pop(200)
+    a.end_interactive_pop()
+    assert len(a.stack) == 1 and a._transition is None and a._interactive is not None
+
+
+def test_springing_back_keeps_the_page(tmp_path):
+    a = _running_app(tmp_path, depth=2)
+    a.begin_interactive_pop("x")
+    a.drag_interactive_pop(30)
+    a.end_interactive_pop()
+    assert len(a.stack) == 2
+
+
+def test_no_finger_following_when_animations_are_off(tmp_path):
+    prefs.set("animations", False)
+    a = _running_app(tmp_path, depth=2)
+    assert a.begin_interactive_pop("x") is False

@@ -112,9 +112,70 @@ def test_queue_button_still_opens_the_queue():
 
 
 def test_tapping_the_art_toggles_play():
-    from musi.player.input import Button
-    s = NowPlayingScreen(FakeApp())
-    assert s.handle_touch(160, 150) == Button.PLAY_PAUSE
+    """The art is a captured gesture now (swipe = skip, drag down = close),
+    so a tap is resolved on release — and still plays / pauses."""
+    app = FakeApp()
+    toggled = []
+    app.toggle_play = lambda: toggled.append(True)
+    s = NowPlayingScreen(app)
+    assert s.on_press(160, 150) is True
+    s.on_release(160, 150)
+    assert toggled == [True]
+
+
+class _SkipMPD(FakeMPD):
+    def __init__(self):
+        super().__init__()
+        self.skips = []
+
+    def next_track(self):
+        self.skips.append("next")
+
+    def prev_track(self):
+        self.skips.append("prev")
+
+
+def test_swiping_the_art_skips_songs():
+    app = FakeApp()
+    app.mpd = _SkipMPD()
+    s = NowPlayingScreen(app)
+    s.on_press(250, 150)
+    s.on_drag(200, 152)
+    s.on_drag(150, 155)
+    assert s._art_dx < 0                            # the art follows the finger
+    s.on_release(150, 155)
+    s.on_press(80, 150)
+    s.on_drag(200, 150)
+    s.on_release(200, 150)
+    assert app.mpd.skips == ["next", "prev"] and s._art_dx == 0
+
+
+def test_a_short_swipe_springs_back_without_skipping():
+    app = FakeApp()
+    app.mpd = _SkipMPD()
+    s = NowPlayingScreen(app)
+    s.on_press(200, 150)
+    s.on_drag(170, 150)
+    s.on_release(170, 150)
+    assert app.mpd.skips == [] and s._art_dx == 0
+
+
+def test_dragging_the_art_down_hands_over_to_the_app():
+    app = FakeApp()
+    calls = []
+    app.begin_interactive_pop = lambda axis: calls.append(("begin", axis)) or True
+    app.drag_interactive_pop = lambda off: calls.append(("drag", off))
+    app.end_interactive_pop = lambda: calls.append(("end",))
+    s = NowPlayingScreen(app)
+    s.on_press(160, 100)
+    s.on_drag(162, 140)
+    s.on_drag(163, 220)
+    s.on_release(163, 220)
+    assert calls == [("begin", "y"), ("drag", 40), ("drag", 120), ("end",)]
+
+
+def test_the_left_edge_stays_the_back_swipe():
+    assert NowPlayingScreen(FakeApp()).on_press(10, 150) is False
 
 
 def test_status_bar_tap_goes_home():

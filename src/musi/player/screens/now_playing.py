@@ -44,6 +44,11 @@ PP_POP_S  = 0.25                # play ⇄ pause icon pops in
 RIPPLE_S  = 0.35                # soft disc behind a tapped control
 HEART_S   = 0.32                # favourite heart bump
 
+# Gestures on the album art
+ART_SLOP   = 12                 # movement before a drag picks its axis
+SKIP_PX    = 70                 # sideways this far → next / previous song
+EDGE_GUARD = 30                 # left edge stays the app's back swipe (gestures.EDGE_W)
+
 
 class NowPlayingScreen(Screen):
     # Stay visible while listening: dim only after 15 min, screen off a
@@ -102,6 +107,11 @@ class NowPlayingScreen(Screen):
         self._radio_msg: str = ""
         self._air_rev:   int = -1             # AirPlay cover version shown
 
+        # album-art gesture: None, or [start_x, start_y, axis] while dragging
+        self._art_drag: list | None = None
+        self._art_dx = 0                      # art follows a sideways drag
+        self._up_next: pygame.Surface | None = None
+
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def on_enter(self) -> None:
@@ -110,7 +120,8 @@ class NowPlayingScreen(Screen):
     @property
     def animates(self) -> bool:
         return (self._swap.active() or self._pp_pop.active()
-                or self._ripple.active() or self._heart.active())
+                or self._ripple.active() or self._heart.active()
+                or self._art_drag is not None)
 
     # ── draw ─────────────────────────────────────────────────────────────────
 
@@ -141,7 +152,7 @@ class NowPlayingScreen(Screen):
             _draw_art(surface, self._old_art, 1.0)
             _draw_art(surface, self._art, swap_e)
         else:
-            _draw_art(surface, self._art, 1.0)
+            _draw_art(surface, self._art, 1.0, self._art_dx)
 
         fade = pygame.Surface((320, FADE_H), pygame.SRCALPHA)
         for i in range(FADE_H):
@@ -195,6 +206,8 @@ class NowPlayingScreen(Screen):
         elif self._time_surf and not live:
             _shadow(surface, self._time_surf, 16, TIME_Y)
             surface.blit(self._time_surf, (16, TIME_Y))
+        if self._up_next is not None and self._drag_seek is None and not live:
+            surface.blit(self._up_next, self._up_next.get_rect(right=BAR_X + BAR_W, y=TIME_Y))
 
         # 8 — transport controls (ripple behind whichever was tapped; the
         #     play/pause glyph pops in whenever the state flips)
@@ -254,14 +267,16 @@ class NowPlayingScreen(Screen):
             else:
                 self._open_queue()
             return None
-        # tapping the album art toggles play/pause (big target)
-        if 26 <= y <= ART_BLEED_H:
-            return Button.PLAY_PAUSE
+        # (the album art is a captured gesture — tap = play/pause, see on_release)
         return None
 
     # ── volume slider + seek bar (drag gestures) ────────────────────────────────
 
     def on_press(self, x: int, y: int) -> bool:
+        # album art: tap = play/pause, swipe sideways = skip, drag down = close
+        if 26 <= y <= ART_BLEED_H and x > EDGE_GUARD:
+            self._art_drag = [x, y, None]
+            return True
         # seek: grab anywhere on/near the progress bar (tap or scrub)
         if BAR_Y - 14 <= y <= BAR_Y + 16 and BAR_X - 10 <= x <= BAR_X + BAR_W + 10:
             # the phone's stream can't be seeked from here
@@ -276,12 +291,38 @@ class NowPlayingScreen(Screen):
         return False
 
     def on_drag(self, x: int, y: int) -> None:
+        if self._art_drag is not None:
+            sx, sy, axis = self._art_drag
+            dx, dy = x - sx, y - sy
+            if axis is None and max(abs(dx), abs(dy)) >= ART_SLOP:
+                if abs(dx) >= abs(dy):
+                    axis = "h"
+                elif dy > 0 and self.app.begin_interactive_pop("y"):
+                    axis = "v"                      # the whole sheet follows
+                else:
+                    axis = "none"                   # upward / not possible: ignore
+                self._art_drag[2] = axis
+            if axis == "h":
+                self._art_dx = int(dx * 0.6)
+            elif axis == "v":
+                self.app.drag_interactive_pop(dy)
+            return
         if self._drag_seek is not None:
             self._drag_seek = self._seek_frac_from_x(x)
         else:
             self._set_vol_from_x(x)
 
     def on_release(self, x: int, y: int) -> None:
+        if self._art_drag is not None:
+            sx, _sy, axis = self._art_drag
+            self._art_drag, self._art_dx = None, 0
+            if axis is None:                         # never moved: a tap
+                self.handle(Button.PLAY_PAUSE, self.app.status)
+            elif axis == "h" and abs(x - sx) >= SKIP_PX:
+                self.handle(Button.NEXT if x < sx else Button.PREV, self.app.status)
+            elif axis == "v":
+                self.app.end_interactive_pop()
+            return
         if self._drag_seek is not None:
             duration = self.app.status.duration
             if duration > 0:
@@ -375,6 +416,7 @@ class NowPlayingScreen(Screen):
         self._cached_path = status.path
         self._art         = None
         self._accent      = theme.ACCENT
+        self._up_next     = self._next_label(status)
         self._station     = None
         self._radio_msg   = ""
         self._logo_wait   = 0.0
@@ -406,6 +448,24 @@ class NowPlayingScreen(Screen):
         self._art = _radio_hero(st, path, self._accent)
         pending = not path and bool(st.get("image"))
         self._logo_wait = time.monotonic() + 1.0 if pending else 0.0
+
+    def _next_label(self, status: PlayerStatus):
+        """'Next: <title>' from the queue — once per track change (one MPD
+        call), never per frame. Nothing when shuffled (the next song isn't
+        knowable), for radio / AirPlay, or at the end of the queue."""
+        if status.shuffle or remote.kind(status.path) in ("radio", "airplay"):
+            return None
+        queue = getattr(self.app.mpd, "queue", None)
+        if queue is None:
+            return None
+        try:
+            items = queue()
+        except Exception:
+            return None
+        nxt = next((q for q in items if q.pos == status.queue_pos + 1), None)
+        if nxt is None or not nxt.title:
+            return None
+        return theme.render(f"Next: {nxt.title}", 10, (170, 170, 185), max_width=170)
 
     def _load_airplay_art(self) -> None:
         """The phone's cover — it can arrive a moment after the title, so
@@ -513,7 +573,8 @@ def _draw_live(surface: pygame.Surface, accent: tuple, msg: str) -> None:
 _no_art: pygame.Surface | None = None
 
 
-def _draw_art(surface: pygame.Surface, art: pygame.Surface | None, a: float) -> None:
+def _draw_art(surface: pygame.Surface, art: pygame.Surface | None, a: float,
+              dx: int = 0) -> None:
     """The hero art (or the "no track" panel) at opacity ``a``."""
     global _no_art
     if art is None:
@@ -524,7 +585,7 @@ def _draw_art(surface: pygame.Surface, art: pygame.Surface | None, a: float) -> 
             lbl = theme.render("no track", 13, theme.DIM)
             _no_art.blit(lbl, lbl.get_rect(center=(160, 10 + ART_BLEED_H // 2)))
         art = _no_art
-    motion.blit_alpha(surface, art, (0, -10), a)
+    motion.blit_alpha(surface, art, (dx, -10), a)
 
 
 def _text(surface: pygame.Surface, surf: pygame.Surface | None, y: int,

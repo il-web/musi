@@ -339,6 +339,25 @@ DONE
       mirror redirect (raspbian.raspberrypi.com -> mirror.isoc.org.il) was
       refusing connections; archive.raspbian.org worked
 
+[x] UI pack (main page, settings groups, gestures)
+    - Launcher page 0 = Home (screens/home_page.py): big clock + date,
+      "Continue listening" card (last played; tap = resume + player, round
+      button = play/pause), info strip (albums, server songs, sleep timer,
+      AirPlay). Cached page, rebuilt on minute/song/info change; SQL only on
+      enter + song change. App order: home, music, radio, settings, clock,
+      sleep, customization
+    - Settings grouped: Sound / Connections / Library / System cards,
+      scrolling, D-pad keeps selection in view (MENU = flattened GROUPS)
+    - transition.InteractivePop: finger-driven pop (axis x = left-edge back
+      swipe, y = drag Now Playing down). Commit past 1/3 or a 700 px/s
+      flick, else spring back; the stack pops at release (quiet: no second
+      transition), the settle plays from snapshots. Only for screens with
+      the default go_back; animations off = old threshold swipe
+    - Now Playing art: captured gesture — tap = play/pause, sideways = skip
+      (art follows, 70 px), down = interactive close; left 30 px left to the
+      back swipe. "Next: <title>" under the bar (queue, once per track;
+      hidden when shuffled / radio / AirPlay)
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
