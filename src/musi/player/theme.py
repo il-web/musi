@@ -88,3 +88,26 @@ def render_cached(
     surface is shared: callers must treat it as read-only.
     """
     return render(text, size, colour, bold, max_width)
+
+
+def wrap(text: str, size: int, bold: bool, max_w: int) -> list[str]:
+    """Word-wrap into as many rows as it takes. Nothing is ever truncated.
+
+    A single word wider than max_w is left long — theme.render will clip it,
+    which beats dropping it.
+    """
+    f = font(size, bold)
+    if not text or f.size(text)[0] <= max_w:
+        return [text]
+    rows: list[str] = []
+    cur = ""
+    for word in text.split():
+        trial = f"{cur} {word}".strip()
+        if cur and f.size(trial)[0] > max_w:
+            rows.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        rows.append(cur)
+    return rows or [text]

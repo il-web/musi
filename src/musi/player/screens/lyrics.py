@@ -33,29 +33,6 @@ RETRY_RECT = pygame.Rect(90, 300, 140, 48)
 _MAX_W = 300
 
 
-def _wrap(text: str, size: int, bold: bool, max_w: int) -> list[str]:
-    """Word-wrap into as many rows as it takes. Nothing is ever truncated.
-
-    A single word wider than max_w is left long — theme.render will clip it,
-    which beats dropping it.
-    """
-    font = theme.font(size, bold)
-    if not text or font.size(text)[0] <= max_w:
-        return [text]
-    rows: list[str] = []
-    cur = ""
-    for word in text.split():
-        trial = f"{cur} {word}".strip()
-        if cur and font.size(trial)[0] > max_w:
-            rows.append(cur)
-            cur = word
-        else:
-            cur = trial
-    if cur:
-        rows.append(cur)
-    return rows or [text]
-
-
 class LyricsScreen(Screen):
 
     # Reading lyrics involves no touching, so the usual inactivity timeouts
@@ -255,7 +232,7 @@ class LyricsScreen(Screen):
         hit = self._surfs.get(key)
         if hit is None:
             size = ACTIVE_SIZE if active else LINE_SIZE
-            rows = _wrap(text, size, active, _MAX_W)
+            rows = theme.wrap(text, size, active, _MAX_W)
             self._rows[key] = rows
             hit = [theme.render(row, size,
                                 theme.WHITE if active else (125, 125, 140),

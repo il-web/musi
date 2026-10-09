@@ -10,6 +10,7 @@ pygame.display.set_mode((320, 480))
 
 import pytest
 
+from musi.player import theme
 from musi.library.lyrics import Lyrics, parse_lrc
 from musi.player.screens import lyrics as ls
 
@@ -195,12 +196,12 @@ def test_draw_while_loading(tmp_path, monkeypatch):
 # ── wrapping ──────────────────────────────────────────────────────────────────
 
 def test_short_lines_are_not_wrapped():
-    assert ls._wrap("short", 15, True, 292) == ["short"]
+    assert theme.wrap("short", 15, True, 292) == ["short"]
 
 
 def test_long_active_lines_wrap_instead_of_truncating():
     text = "One thing I never see the same when your 'round"
-    rows = ls._wrap(text, 15, True, 292)
+    rows = theme.wrap(text, 15, True, 292)
     assert len(rows) == 2
     assert " ".join(rows) == text          # every word survives
 
@@ -208,13 +209,13 @@ def test_long_active_lines_wrap_instead_of_truncating():
 def test_wrap_uses_as_many_rows_as_it_takes():
     """No row cap: a long line wraps rather than losing its tail."""
     text = " ".join(["word"] * 60)
-    rows = ls._wrap(text, 15, True, 292)
+    rows = theme.wrap(text, 15, True, 292)
     assert len(rows) > 2
     assert " ".join(rows) == text
 
 
 def test_wrap_of_one_huge_word_still_returns_it():
-    assert ls._wrap("A" * 200, 15, True, 292) == ["A" * 200]
+    assert theme.wrap("A" * 200, 15, True, 292) == ["A" * 200]
 
 
 # ── never sleeps ──────────────────────────────────────────────────────────────

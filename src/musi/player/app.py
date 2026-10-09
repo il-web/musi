@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 import pygame
 
@@ -70,6 +72,8 @@ class App:
         self._frame_no:        int          = 0      # frames drawn — see _begin_transition
         self._frame:           pygame.Surface | None = None   # offscreen, for transitions
         self._remote_meta:     dict[str, dict | None] = {}
+        # called once, after the first frame reaches the panel (crashguard)
+        self.first_frame_hook: "Callable[[], None] | None" = None
         if mpd is not None:
             mpd.remote_meta = self._lookup_remote
 
@@ -379,6 +383,12 @@ class App:
                 surface.blit(self._dim_surf, (0, 0))
 
             pygame.display.flip()
+            if self.first_frame_hook is not None:
+                hook, self.first_frame_hook = self.first_frame_hook, None
+                try:
+                    hook()
+                except Exception:
+                    logging.warning("first-frame hook failed", exc_info=True)
 
             if self._wake_flip:
                 # a fresh frame is on the panel — now light it up (no stale flash)

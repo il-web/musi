@@ -6,17 +6,19 @@ animated staged progress popup while updating.
 from __future__ import annotations
 
 import threading
+import time
 
 import pygame
 
-from musi.player import audio_detect, hardening, statusbar, theme, updater
+from musi.player import audio_detect, crashguard, hardening, statusbar, theme, updater
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
 CHECK_RECT  = pygame.Rect(20, 396, 130, 50)
 UPDATE_RECT = pygame.Rect(170, 396, 130, 50)
-LOG_Y       = 198          # top of the "What's new" list
+CRASH_RECT  = pygame.Rect(14, 182, 292, 22)   # "Last crash …" line → crash log
+LOG_Y       = 212          # top of the "What's new" list
 LOG_BOTTOM  = 388
 
 
@@ -36,8 +38,10 @@ class UpdatesScreen(Screen):
         self._prog:       float = 0.0   # target fraction
         self._prog_shown: float = 0.0   # animated (eased) fraction
         self._prog_label: str   = ""
+        self._crash: dict | None = None
 
     def on_enter(self) -> None:
+        self._crash  = crashguard.last_crash()
         self._locked = hardening.overlay_active()
         self._status = updater.UpdateStatus(current=updater.current_version())
         self._check()
@@ -117,6 +121,19 @@ class UpdatesScreen(Screen):
             line, col = "—", theme.DIM
         s = theme.render(line, 13, col, max_width=300)
         surface.blit(s, s.get_rect(centerx=160, y=164))
+
+        # last crash — tap for the full log
+        if self._crash:
+            c = self._crash
+            line = f"Last crash {_ago(c.get('t', 0))} · {c.get('reason', '')}"
+            s = theme.render(line, 11, (230, 140, 140), max_width=CRASH_RECT.w - 14)
+            surface.blit(s, (CRASH_RECT.x, CRASH_RECT.y + 4))
+            pygame.draw.line(surface, (230, 140, 140),
+                             (CRASH_RECT.right - 8, CRASH_RECT.y + 7),
+                             (CRASH_RECT.right - 4, CRASH_RECT.y + 11), 2)
+            pygame.draw.line(surface, (230, 140, 140),
+                             (CRASH_RECT.right - 4, CRASH_RECT.y + 11),
+                             (CRASH_RECT.right - 8, CRASH_RECT.y + 15), 2)
 
         # "What's new" changelog
         if st and st.available and st.changelog:
@@ -207,7 +224,10 @@ class UpdatesScreen(Screen):
             return None        # modal — block input during update
         if y < 26:
             return Button.HOME
-        if CHECK_RECT.collidepoint(x, y):
+        if self._crash and CRASH_RECT.collidepoint(x, y):
+            from musi.player.screens.crash_log import CrashLogScreen
+            self.app.push(CrashLogScreen(self.app))
+        elif CHECK_RECT.collidepoint(x, y):
             self._check()
         elif UPDATE_RECT.collidepoint(x, y):
             self._update()
@@ -220,3 +240,12 @@ class UpdatesScreen(Screen):
             self.app.pop()
         elif button == Button.SELECT:
             self._update()
+
+
+def _ago(t: float) -> str:
+    s = max(0, int(time.time() - t))
+    if s < 3600:
+        return f"{max(1, s // 60)} min ago"
+    if s < 86400:
+        return f"{s // 3600} h ago"
+    return f"{s // 86400} d ago"

@@ -167,11 +167,22 @@ def apply(progress: "Callable[[float, str], None] | None" = None) -> tuple[bool,
         return False, f"Refused: {why}"
 
     step(0.15, "Downloading…")
+    rc0, before = _git("rev-parse", "HEAD", timeout=5)
     rc, out = _git("pull", "--ff-only", timeout=120)
     if rc != 0:
         return False, out or "pull failed"
+    rc2, after = _git("rev-parse", "HEAD", timeout=5)
+    if rc0 == 0 and rc2 == 0 and before != after:
+        # what this update replaced — the crash guard can offer to go back
+        from musi.player import crashguard
+        crashguard.note_update(before, after)
     step(0.55, "Downloaded")
 
+    return _install_and_restart(step)
+
+
+def _install_and_restart(step: "Callable[[float, str], None]") -> tuple[bool, str]:
+    """pip install, update.sh, restart the service — shared by apply/rollback."""
     # Reinstall in case dependencies/entry-points changed (best-effort, quiet).
     step(0.60, "Installing…")
     py = REPO_DIR / ".venv" / "bin" / "pip"
@@ -215,3 +226,33 @@ def apply(progress: "Callable[[float, str], None] | None" = None) -> tuple[bool,
         return False, f"restart failed: {exc}"
 
     return True, "Restarting…"
+
+
+def rollback(target: str,
+             progress: "Callable[[float, str], None] | None" = None) -> tuple[bool, str]:
+    """Go back to ``target`` (the version an update replaced) and restart.
+
+    The target must still carry a good signature — a rollback runs update.sh
+    like an update does, so it gets the same check. ``git reset --keep`` moves
+    the branch back but refuses to throw away local edits; the next normal
+    update fast-forwards from there as usual.
+    """
+    def step(frac: float, label: str) -> None:
+        if progress:
+            progress(frac, label)
+
+    step(0.08, "Preparing…")
+    if not _is_git_repo():
+        return False, "Not a git checkout"
+    step(0.12, "Verifying signature…")
+    ok, why = verify_signature(target)
+    if not ok:
+        return False, f"Refused: {why}"
+    step(0.20, "Rolling back…")
+    rc, out = _git("reset", "--keep", target, timeout=60)
+    if rc != 0:
+        return False, out or "rollback failed"
+    from musi.player import crashguard
+    crashguard.rolled_back(target)
+    step(0.55, "Rolled back")
+    return _install_and_restart(step)

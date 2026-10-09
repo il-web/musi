@@ -209,6 +209,24 @@ DONE
       library (time + cover download). Possible follow-ups: auto-sync at
       boot, "download for offline", max-bitrate setting on the device
 
+[x] Crash guard pack
+    - player/crashguard.py, armed first thing in __main__ (before the rest
+      of the player is imported): faulthandler + excepthook write into
+      ~/.local/share/musi/crash/current.txt; the next start harvests it into
+      crash.log (64 KB cap) + state.json. Clean exits, systemctl restarts
+      and power cuts write nothing, so they never count as crashes
+    - Settings -> Updates: "Last crash N min ago · <reason>" line (reason =
+      error + musi file:line), tap -> scrollable crash log
+    - updater.apply records {from, to}; >=3 crashes of that fresh version in
+      15 min -> app opens on RollbackScreen: "Roll back to <from>" or "Keep
+      this version" (not asked again). Rollback = verify-commit the target,
+      git reset --keep, pip, update.sh, restart (refused under storage lock)
+    - Only automatic case: >=6 crashes and the version never drew a frame
+      (no screen to ask on) -> rolls back by itself
+    - theme.wrap (moved from lyrics) for wrapped text on the new screens
+    - First update that can be rolled back is the one AFTER this pack
+      (the pull that installs it still runs the old updater)
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------
