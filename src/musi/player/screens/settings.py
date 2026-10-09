@@ -1,4 +1,9 @@
-"""Settings screen — top-level settings menu."""
+"""Settings — grouped like iOS: Sound, Connections, Library, System.
+
+Each group is a heading over one rounded card of rows. The groups are taller
+than the screen, so the list scrolls (drag), and the keyboard / D-pad
+selection keeps the selected row in view.
+"""
 from __future__ import annotations
 
 import pygame
@@ -9,20 +14,34 @@ from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 from musi.player.widgets import PendingTap
 
-MENU   = ["Bluetooth", "WiFi", "Playback", "Music Server", "Artwork", "API",
-          "Updates", "Power"]
+GROUPS: list[tuple[str, list[str]]] = [
+    ("Sound",       ["Playback", "Bluetooth"]),
+    ("Connections", ["WiFi", "Music Server", "API"]),
+    ("Library",     ["Artwork"]),
+    ("System",      ["Updates", "Power"]),
+]
+MENU = [name for _, names in GROUPS for name in names]
 
-# Distribute the menu items evenly between the header and the mini bar so the
-# menu fills the panel instead of bunching at the top.
-_TOP    = 64
-_BOTTOM = minibar.BAR_Y
-_SLOT   = (_BOTTOM - _TOP) // len(MENU)   # vertical space per item
-ITEM_H  = min(70, _SLOT)                  # card height (shrinks as MENU grows)
+_TOP     = 60                     # list area: below the header …
+_BOTTOM  = minibar.BAR_Y          # … down to the mini bar
+ROW_H    = 46
+HEAD_H   = 28                     # group heading
+GROUP_GAP = 10
+CARD_X, CARD_W = 10, 300
 
 
-def _item_y(i: int) -> int:
-    """Top y of item i, centred within its evenly-spaced slot."""
-    return _TOP + i * _SLOT + (_SLOT - ITEM_H) // 2
+def _layout() -> tuple[list[tuple[str, int]], list[int], int]:
+    """(headings [(title, y)], row tops by MENU index, total height) —
+    y measured from the top of the scrolling list."""
+    heads, rows, y = [], [], 0
+    for title, names in GROUPS:
+        heads.append((title, y))
+        y += HEAD_H
+        for _ in names:
+            rows.append(y)
+            y += ROW_H
+        y += GROUP_GAP
+    return heads, rows, y
 
 
 class SettingsScreen(Screen):
@@ -32,42 +51,59 @@ class SettingsScreen(Screen):
         self._sel = 0
         self._tap = PendingTap()
         self._header_surf: pygame.Surface | None = None
-        self._menu_surfs:  list[pygame.Surface]  = []
+        self._scroll = 0.0
+        self._heads, self._rows, total = _layout()
+        self._max_scroll = max(0.0, total - (_BOTTOM - _TOP))
 
     # ── draw ──────────────────────────────────────────────────────────────────
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
         if self._header_surf is None:
             self._header_surf = theme.render("Settings", 16, theme.WHITE, bold=True)
-            self._menu_surfs  = [theme.render(m, 16, theme.WHITE) for m in MENU]
 
         surface.fill(theme.BG)
-        statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
+        statusbar.draw(surface, status, audio_detect.get_audio_type(),
+                       show_home=len(self.app.stack) > 1)
         self._tap.update()
+        surface.blit(self._header_surf, (14, 30))
 
-        # section header
-        surface.blit(self._header_surf, (14, 26))
-
-        # menu items
-        for i, label_surf in enumerate(self._menu_surfs):
-            y = _item_y(i)
-            rect = pygame.Rect(10, y, 300, ITEM_H - 4)
-
-            if i == self._sel:
-                pygame.draw.rect(surface, theme.ACCENT, rect, border_radius=8)
-                _draw_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.WHITE)
-                surface.blit(label_surf, (60, y + (ITEM_H - label_surf.get_height()) // 2 - 2))
-                icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, theme.WHITE)
-            else:
-                pygame.draw.rect(surface, theme.CARD_BG, rect, border_radius=8)
-                _draw_icon(surface, i, 36, y + (ITEM_H - 4) // 2, theme.DIM)
-                dim = theme.render(MENU[i], 16, theme.DIM)
-                surface.blit(dim, (60, y + (ITEM_H - dim.get_height()) // 2 - 2))
-                icons.draw_chevron_right(surface, 302, y + (ITEM_H - 4) // 2, theme.CARD_BG)
+        clip = surface.get_clip()
+        surface.set_clip(pygame.Rect(0, _TOP, 320, _BOTTOM - _TOP))
+        top = _TOP - int(self._scroll)
+        i = 0
+        for gi, (title, names) in enumerate(GROUPS):
+            head_y = top + self._heads[gi][1]
+            h = theme.render_cached(title.upper(), 10, theme.DIM, bold=True)
+            surface.blit(h, (CARD_X + 8, head_y + HEAD_H - h.get_height() - 6))
+            card = pygame.Rect(CARD_X, top + self._rows[i], CARD_W, ROW_H * len(names))
+            pygame.draw.rect(surface, theme.CARD_BG, card, border_radius=12)
+            for k, name in enumerate(names):
+                y = top + self._rows[i]
+                sel = i == self._sel and self._tap.pending
+                if sel:
+                    r = pygame.Rect(CARD_X, y, CARD_W, ROW_H)
+                    pygame.draw.rect(surface, theme.ACCENT, r, border_radius=12 if len(names) == 1 else 0)
+                elif k:
+                    pygame.draw.line(surface, (40, 40, 56), (CARD_X + 48, y),
+                                     (CARD_X + CARD_W - 12, y), 1)
+                col = theme.WHITE if sel else theme.DIM
+                _draw_icon(surface, i, CARD_X + 26, y + ROW_H // 2, theme.WHITE if sel else theme.ACCENT)
+                label = theme.render_cached(name, 15, theme.WHITE)
+                surface.blit(label, (CARD_X + 48, y + (ROW_H - label.get_height()) // 2))
+                icons.draw_chevron_right(surface, CARD_X + CARD_W - 14, y + ROW_H // 2, col)
+                i += 1
+        surface.set_clip(clip)
 
         minibar.draw(surface, self.app, status)
 
     # ── input ─────────────────────────────────────────────────────────────────
+
+    def _index_at(self, y: int) -> int | None:
+        rel = y - _TOP + self._scroll
+        for i, top in enumerate(self._rows):
+            if top <= rel < top + ROW_H:
+                return i
+        return None
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
         zone = minibar.hit(x, y)
@@ -80,18 +116,31 @@ class SettingsScreen(Screen):
             return None
 
         if _TOP <= y < _BOTTOM and not self._tap.pending:
-            i = (y - _TOP) // _SLOT
-            if 0 <= i < len(MENU):
+            i = self._index_at(y)
+            if i is not None:
                 self._sel = i
                 self._tap.set(self._open)
                 return None
         return super().handle_touch(x, y)
 
+    def handle_scroll(self, dy: float) -> None:
+        self._scroll = max(0.0, min(self._max_scroll, self._scroll - dy))
+
+    def _keep_visible(self) -> None:
+        top = self._rows[self._sel]
+        view = _BOTTOM - _TOP
+        if top < self._scroll:
+            self._scroll = max(0.0, top - HEAD_H)
+        elif top + ROW_H > self._scroll + view:
+            self._scroll = min(self._max_scroll, top + ROW_H - view)
+
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.UP:
             self._sel = (self._sel - 1) % len(MENU)
+            self._keep_visible()
         elif button == Button.DOWN:
             self._sel = (self._sel + 1) % len(MENU)
+            self._keep_visible()
         elif button == Button.SELECT:
             self._open()
         elif button == Button.BACK:
