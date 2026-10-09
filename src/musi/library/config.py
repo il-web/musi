@@ -43,6 +43,11 @@ def crash_dir() -> Path:
     return Path(os.environ.get("MUSI_CRASH_DIR", _BASE / "crash"))
 
 
+def listenbrainz_path() -> Path:
+    """ListenBrainz token + user (0600); the listen queue sits beside it."""
+    return Path(os.environ.get("MUSI_LISTENBRAINZ_PATH", _BASE / "listenbrainz.json"))
+
+
 def subsonic_path() -> Path:
     """Music-server login (URL, user, password) — 0600, see library/subsonic.py."""
     return Path(os.environ.get("MUSI_SUBSONIC_PATH", _BASE / "subsonic.json"))

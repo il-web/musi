@@ -203,7 +203,7 @@ class LoadingScreen(Screen):
     def _apply_prefs(self) -> None:
         """Push stored playback preferences into MPD.
 
-        MPD keeps crossfade in its own state file, so a preference changed
+        MPD keeps crossfade and ReplayGain in its own state file, so a preference changed
         while the daemon was down would otherwise disagree with what the
         Playback screen shows. Best-effort: a failure here must not stop boot.
         """
@@ -212,6 +212,7 @@ class LoadingScreen(Screen):
         try:
             on = bool(prefs.get("crossfade"))
             self.app.mpd.set_crossfade(CROSSFADE_S if on else 0)
+            self.app.mpd.set_replay_gain(bool(prefs.get("replaygain")))
         except Exception:
             import logging
             logging.warning("could not apply playback prefs", exc_info=True)

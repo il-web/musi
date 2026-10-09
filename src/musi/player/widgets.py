@@ -324,3 +324,20 @@ def draw_scrollbar(surface: pygame.Surface, x: int, y: int, h: int,
     thumb_h = max(16, int(h * frac))
     thumb_y = y + int((h - thumb_h) * klist.offset / klist.max_offset)
     pygame.draw.rect(surface, theme.DIM, (x, thumb_y, 2, thumb_h), border_radius=1)
+
+
+SWITCH_W, SWITCH_H = 44, 24
+
+
+def draw_switch(surface: pygame.Surface, x: int, cy: int, pos: float) -> None:
+    """Pill switch; ``pos`` 0 = off (knob left, grey) … 1 = on (right, accent).
+
+    Fractional ``pos`` is the knob mid-travel, for a motion.Tween to drive.
+    """
+    from musi.player import motion
+    track = pygame.Rect(x, cy - SWITCH_H // 2, SWITCH_W, SWITCH_H)
+    col = motion.lerp_colour((60, 60, 78), theme.ACCENT, pos)
+    pygame.draw.rect(surface, col, track, border_radius=SWITCH_H // 2)
+    r = SWITCH_H // 2 - 3
+    kx = int(motion.lerp(track.x + 3 + r, track.right - 3 - r, pos))
+    pygame.draw.circle(surface, theme.WHITE, (kx, cy), r)

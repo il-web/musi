@@ -90,50 +90,43 @@ class FakeApp:
 
 
 def _screen():
-    from musi.player.screens.playback import OPTIONS, PlaybackScreen
+    from musi.player.screens.playback import ROWS, PlaybackScreen
     app = FakeApp(_client())
     s = PlaybackScreen(app)
     app.stack.append(s)
-    return s, app, OPTIONS
+    return s, app, [k for k, _, _ in ROWS]
 
 
-def _tap_option(screen, index):
-    """Tap option ``index`` and let PendingTap's deferred action fire.
-
-    PendingTap holds the action for 0.12 s so the pressed row flashes, so the
-    wait is real — same idiom as tests/test_customization_screen.py."""
-    import time
-
+def _tap(screen, key):
     from musi.player.screens import playback
-    r = playback.row_rect(index)
+    keys = [k for k, _, _ in playback.ROWS]
+    r = playback.row_rect(keys.index(key))
     screen.handle_touch(r.centerx, r.centery)
-    time.sleep(0.15)
-    screen._tap.update()
 
 
-def test_turning_crossfade_on_writes_the_pref_and_tells_mpd(monkeypatch):
-    s, app, OPTIONS = _screen()
-    on = next(i for i, (v, _) in enumerate(OPTIONS) if v is True)
-    _tap_option(s, on)
+def test_turning_crossfade_on_writes_the_pref_and_tells_mpd():
+    s, app, _ = _screen()
+    _tap(s, "crossfade")
     assert prefs.get("crossfade") is True
     assert app.mpd._client.calls == [2]
 
 
 def test_turning_crossfade_off_sends_zero():
-    s, app, OPTIONS = _screen()
+    s, app, _ = _screen()
     prefs.set("crossfade", True)
-    off = next(i for i, (v, _) in enumerate(OPTIONS) if v is False)
-    _tap_option(s, off)
+    _tap(s, "crossfade")
     assert prefs.get("crossfade") is False
     assert app.mpd._client.calls == [0]
 
 
-def test_the_screen_draws_in_both_states():
+def test_the_screen_draws_in_both_states(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUSI_LISTENBRAINZ_PATH", str(tmp_path / "lb.json"))
     s, _, _ = _screen()
     surf = pygame.Surface((320, 480))
     from musi.player.mpd_client import PlayerStatus
     for value in (False, True):
         prefs.set("crossfade", value)
+        prefs.set("replaygain", value)
         s.draw(surf, PlayerStatus.disconnected())
 
 

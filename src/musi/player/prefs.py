@@ -17,6 +17,10 @@ DEFAULTS: dict[str, object] = {
     # Off by default: crossfade eats the start and end of every track, which is
     # wrong for anything with a deliberate intro or outro.
     "crossfade": False,
+    # ReplayGain volume leveling. Off by default: it only does anything for
+    # files carrying ReplayGain tags, and changes how loud everything else is
+    # relative to them.
+    "replaygain": False,
     # Screen transitions and Now Playing motion (Customization → Animations).
     "animations": True,
 }

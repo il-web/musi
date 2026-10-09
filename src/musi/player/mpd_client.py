@@ -298,6 +298,13 @@ class MusiMPDClient:
         self._cmd(lambda: self._client.crossfade(int(seconds)))
 
     @_synchronized
+    def set_replay_gain(self, on: bool) -> None:
+        """Volume leveling from ReplayGain tags. "auto" = album gain while an
+        album plays in order, track gain when shuffled. Untagged files are
+        left as they are. Re-applied at startup, like crossfade."""
+        self._cmd(lambda: self._client.replay_gain_mode("auto" if on else "off"))
+
+    @_synchronized
     def toggle_repeat(self) -> None:
         if not self._ensure():
             return

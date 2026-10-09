@@ -584,6 +584,35 @@ def create_app(
             return jsonify(error=job.error or "no music server set up"), 409
         return jsonify(_subsonic_state()), 202
 
+    # ── ListenBrainz ──────────────────────────────────────────────────────────
+
+    @app.get("/api/v1/listenbrainz")
+    def api_listenbrainz_get():
+        from musi.library import listenbrainz
+        s = listenbrainz.load_settings()
+        return jsonify(connected=bool(s), user=(s or {}).get("user"),
+                       queued=listenbrainz.queued())
+
+    @app.put("/api/v1/listenbrainz")
+    def api_listenbrainz_put():
+        """Save a user token — checked against ListenBrainz first."""
+        from musi.library import listenbrainz
+        token = ((request.get_json(silent=True) or {}).get("token") or "").strip()
+        if not token:
+            return jsonify(error="token is required"), 400
+        try:
+            user = listenbrainz.validate_token(token)
+        except listenbrainz.ListenBrainzError as exc:
+            return jsonify(error=str(exc)), 400
+        listenbrainz.save_settings(token, user)
+        return jsonify(connected=True, user=user)
+
+    @app.delete("/api/v1/listenbrainz")
+    def api_listenbrainz_delete():
+        from musi.library import listenbrainz
+        listenbrainz.clear_settings()
+        return jsonify(connected=False)
+
     @app.get("/api/v1/status")
     def api_status():
         from musi.player import updater

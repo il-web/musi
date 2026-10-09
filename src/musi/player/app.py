@@ -12,7 +12,6 @@ from typing import Callable
 
 import pygame
 
-from musi.library import remote, subsonic
 from musi.player import backlight, motion, theme
 from musi.player.input import Button, key_to_button
 from musi.player.gestures import EDGE_W, resolve_edge_swipe
@@ -73,6 +72,8 @@ class App:
         self._frame:           pygame.Surface | None = None   # offscreen, for transitions
         self._remote_meta:     dict[str, dict | None] = {}
         self._last_bg:         float        = 0.0    # last background-jobs tick
+        from musi.player.scrobbler import Scrobbler
+        self._scrobbler = Scrobbler()
         # called once, after the first frame reaches the panel (crashguard)
         self.first_frame_hook: "Callable[[], None] | None" = None
         if mpd is not None:
@@ -269,6 +270,7 @@ class App:
                 self._last_poll = now
                 self._poll_time = now
                 self._maybe_record_play()
+                self._scrobbler.update(self._status)
 
             # ── background jobs (once a minute) ───────────────────────────────
             if now - self._last_bg >= 60.0:
@@ -505,8 +507,6 @@ class App:
         if self._status.state == "play" and path and path != self._last_track_path:
             self._mpd.record_play(self._db, path)
             self._last_track_path = path
-            if remote.is_remote(path):
-                subsonic.scrobble_async(path)
 
     def _background(self, uptime: float) -> None:
         """Once-a-minute housekeeping. Each job decides for itself whether it
@@ -517,6 +517,9 @@ class App:
             # under the storage lock every write evaporates at reboot
             if not hardening.overlay_active():
                 subsonic_sync.maybe_auto_sync(config.db_path(), self._art_dir, uptime)
+            from musi.library import listenbrainz
+            if listenbrainz.queued():           # plays made while offline
+                listenbrainz.flush_async()
         except Exception:
             logging.warning("background tick failed", exc_info=True)
 

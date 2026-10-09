@@ -200,9 +200,11 @@ class Client:
         except (urllib.error.URLError, OSError) as exc:
             raise SubsonicError(f"cover download failed ({exc})") from exc
 
-    def scrobble(self, song_id: str) -> None:
-        """Tell the server a song was played (its play counts, Last.fm…)."""
-        self.call("scrobble", id=song_id, submission="true")
+    def scrobble(self, song_id: str, submission: bool = True) -> None:
+        """Tell the server a song was played (its play counts, Last.fm…), or
+        with submission=False, that it is playing now."""
+        self.call("scrobble", id=song_id,
+                  submission="true" if submission else "false")
 
 
 def _http_get(url: str) -> bytes:
@@ -211,8 +213,9 @@ def _http_get(url: str) -> bytes:
         return resp.read()
 
 
-def scrobble_async(path: str) -> None:
-    """Report a play of one of our stream URLs, off the calling thread.
+def scrobble_async(path: str, submission: bool = True) -> None:
+    """Report a play (or 'now playing') of one of our stream URLs, off the
+    calling thread. When a play counts is player/scrobbler.py's call.
 
     Fire-and-forget: a scrobble that fails (offline, server down) is only a
     missed play count, never worth stalling the UI loop over.
@@ -229,7 +232,7 @@ def scrobble_async(path: str) -> None:
         try:
             client = Client.from_settings()
             if client:
-                client.scrobble(sid)
+                client.scrobble(sid, submission)
         except Exception:
             log.info("scrobble failed", exc_info=True)
 
