@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pygame
 
+from musi.library import remote
 from musi.player import art_cache, icons, theme
 
 BAR_H: int = 44
@@ -23,7 +24,7 @@ _accent:      tuple = theme.ACCENT
 _cached_path: str | None = "UNSET"
 _title_surf:  pygame.Surface | None = None
 _meta_surf:   pygame.Surface | None = None
-_prev_title:  str = ""
+_prev_title:  tuple = ("", False)   # (title, streamed?)
 _prev_meta:   str = ""
 
 
@@ -85,9 +86,14 @@ def _update_text(status) -> None:
     global _title_surf, _meta_surf, _prev_title, _prev_meta
     title = status.title or "Nothing playing"
     meta  = status.artist or ""
-    if title != _prev_title:
-        _prev_title = title
-        _title_surf = theme.render(title, 12, theme.WHITE, bold=True, max_width=224)
+    cloud = remote.is_remote(status.path)
+    key   = (title, cloud)
+    if key != _prev_title:
+        _prev_title = key
+        _title_surf = theme.render(title, 12, theme.WHITE, bold=True,
+                                   max_width=224 - (icons.CLOUD_W if cloud else 0))
+        if cloud:
+            _title_surf = icons.with_cloud(_title_surf, theme.DIM)
     if meta != _prev_meta:
         _prev_meta = meta
         _meta_surf = theme.render(meta, 10, theme.DIM, max_width=224)

@@ -81,3 +81,32 @@ def draw_heart(surface: pygame.Surface, cx: int, cy: int, col: tuple,
         pygame.draw.circle(surface, col, lobe_r, r, 2)
         pygame.draw.lines(surface, col, False,
                           [(cx - 2 * r + 1, cy - 1), point, (cx + 2 * r - 1, cy - 1)], 2)
+
+
+CLOUD_W = 16    # room to leave after a title for draw_cloud_after()
+
+
+def draw_cloud(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
+    """Small cloud — marks a track streamed from the music server."""
+    pygame.draw.circle(surface, col, (cx - 3, cy + 1), 3)
+    pygame.draw.circle(surface, col, (cx + 1, cy - 1), 4)
+    pygame.draw.circle(surface, col, (cx + 4, cy + 1), 3)
+    pygame.draw.rect(surface, col, (cx - 5, cy + 1, 11, 3), border_radius=1)
+
+
+def draw_cloud_after(surface: pygame.Surface, text_rect: pygame.Rect,
+                     col: tuple) -> None:
+    """The cloud tag just right of a rendered title, centred on its line.
+    Callers shrink the title's max_width by CLOUD_W so it always fits."""
+    draw_cloud(surface, text_rect.right + 10, text_rect.centery, col)
+
+
+def with_cloud(text: pygame.Surface, col: tuple) -> pygame.Surface:
+    """``text`` with the cloud tag baked in after it, as one surface — for
+    cached titles that get shadowed or animated as a unit (Now Playing, the
+    mini bar)."""
+    w, h = text.get_size()
+    out = pygame.Surface((w + CLOUD_W, h), pygame.SRCALPHA)
+    out.blit(text, (0, 0))
+    draw_cloud(out, w + 10, h // 2, col)
+    return out

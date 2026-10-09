@@ -2,7 +2,7 @@
 
 Wraps python-mpd2 with:
   - Auto-reconnect on dropped connection
-  - Absolute <-> relative path conversion
+  - Absolute <-> relative path conversion (stream URLs pass through as-is)
   - Clean PlayerStatus dataclass for the UI
   - play_paths() to replace the queue and start playback
   - stored-playlist CRUD, and Favourites as one reserved playlist
@@ -17,9 +17,11 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import time
-from typing import Optional
+from typing import Callable, Optional
 
 import mpd
+
+from musi.library import remote
 
 # The Favourites list is just an ordinary stored playlist with a fixed name; the
 # heart toggle on Now Playing adds/removes the current track in it.
@@ -35,6 +37,13 @@ def _safe_playlist_name(name: str) -> str:
     """Trim a user-typed playlist name to something MPD will accept as a file."""
     cleaned = re.sub(r'[/\\\x00-\x1f]', "", str(name)).strip().lstrip(".")
     return cleaned[:_NAME_MAX].strip()
+
+
+def _stem(rel: str) -> str:
+    """Fallback title from a file name ('' for a URL — no useful name there)."""
+    if not rel or remote.is_remote(rel):
+        return ""
+    return Path(rel).stem
 
 
 def _tag(song: dict, key: str, default: str = "") -> str:
@@ -124,6 +133,10 @@ class MusiMPDClient:
         port: int = 6600,
     ) -> None:
         self._music_root = Path(music_root)
+        # Server tracks reach MPD as stream URLs, which often carry no tags of
+        # their own; the app plugs in a library lookup (url -> {title, artist,
+        # album, duration}) so they still show proper names.
+        self.remote_meta: Callable[[str], Optional[dict]] | None = None
         self._host = host
         self._port = port
         self._lock = threading.RLock()   # see _synchronized
@@ -199,14 +212,17 @@ class MusiMPDClient:
             queue_len = int(status.get("playlistlength", 0))
 
             rel_path = song.get("file", "")
-            abs_path = str(self._music_root / rel_path) if rel_path else None
+            abs_path = self._to_absolute(rel_path) or None
+            meta = self._meta(rel_path)
+            if not duration and meta.get("duration"):
+                duration = float(meta["duration"])
 
             return PlayerStatus(
                 state=state,
                 path=abs_path,
-                title=_tag(song, "title", Path(rel_path).stem if rel_path else ""),
-                artist=_tag(song, "artist", ""),
-                album=_tag(song, "album", ""),
+                title=_tag(song, "title", meta.get("title") or _stem(rel_path)),
+                artist=_tag(song, "artist", meta.get("artist", "")),
+                album=_tag(song, "album", meta.get("album", "")),
                 elapsed=elapsed,
                 duration=duration,
                 volume=volume,
@@ -312,7 +328,7 @@ class MusiMPDClient:
         try:
             self._client.clear()
             for p in paths:
-                rel = self._to_relative(Path(p))
+                rel = self._to_relative(p)
                 self._client.add(rel)
             if paths:
                 self._client.play(start_index)
@@ -332,9 +348,10 @@ class MusiMPDClient:
         return [
             QueueItem(
                 pos    = int(s.get("pos", 0)),
-                title  = _tag(s, "title", Path(s.get("file", "")).stem),
-                artist = _tag(s, "artist", ""),
-                path   = str(self._music_root / s["file"]) if s.get("file") else "",
+                title  = _tag(s, "title", self._meta(s.get("file", "")).get("title")
+                              or _stem(s.get("file", ""))),
+                artist = _tag(s, "artist", self._meta(s.get("file", "")).get("artist", "")),
+                path   = self._to_absolute(s.get("file", "")),
             )
             for s in songs
         ]
@@ -352,7 +369,7 @@ class MusiMPDClient:
         try:
             pos = int(self._client.status().get("song", -1)) + 1
             for i, p in enumerate(paths):
-                self._client.addid(self._to_relative(Path(p)), pos + i)
+                self._client.addid(self._to_relative(p), pos + i)
         except Exception:
             self._connected = False
 
@@ -363,7 +380,7 @@ class MusiMPDClient:
             return
         try:
             for p in paths:
-                self._client.add(self._to_relative(Path(p)))
+                self._client.add(self._to_relative(p))
         except Exception:
             self._connected = False
 
@@ -416,9 +433,9 @@ class MusiMPDClient:
         for s in songs:
             rel = s.get("file", "")
             out.append({
-                "path":     str(self._music_root / rel) if rel else "",
-                "title":    _tag(s, "title", Path(rel).stem if rel else ""),
-                "artist":   _tag(s, "artist", ""),
+                "path":     self._to_absolute(rel),
+                "title":    _tag(s, "title", self._meta(rel).get("title") or _stem(rel)),
+                "artist":   _tag(s, "artist", self._meta(rel).get("artist", "")),
                 "duration": float(s.get("duration", s.get("time", 0)) or 0),
             })
         return out
@@ -433,7 +450,7 @@ class MusiMPDClient:
             return
         try:
             for p in paths:
-                self._client.playlistadd(name, self._to_relative(Path(p)))
+                self._client.playlistadd(name, self._to_relative(p))
         except Exception:
             self._connected = False
 
@@ -504,14 +521,14 @@ class MusiMPDClient:
     def is_favorite(self, abs_path: str) -> bool:
         if not abs_path or not self._ensure():
             return False
-        return self._to_relative(Path(abs_path)) in self._favorites_rel()
+        return self._to_relative(abs_path) in self._favorites_rel()
 
     @_synchronized
     def toggle_favorite(self, abs_path: str) -> bool:
         """Add or remove a track in Favourites. Returns the new favourite state."""
         if not abs_path or not self._ensure():
             return False
-        rel = self._to_relative(Path(abs_path))
+        rel = self._to_relative(abs_path)
         current = self._favorites_rel()
         try:
             if rel in current:
@@ -543,12 +560,35 @@ class MusiMPDClient:
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _to_relative(self, path: Path) -> str:
-        """Convert absolute path to MPD-relative path."""
+    def _to_relative(self, path: "Path | str") -> str:
+        """Convert absolute path to MPD-relative path. A stream URL is already
+        what MPD wants — and must never go through Path, which mangles it."""
+        if remote.is_remote(path):
+            return path
+        path = Path(path)
         try:
             return str(path.relative_to(self._music_root)).replace("\\", "/")
         except ValueError:
             return str(path).replace("\\", "/")
+
+    def _to_absolute(self, rel: str) -> str:
+        """MPD 'file' → the path the library knows ('' for nothing)."""
+        if not rel:
+            return ""
+        if remote.is_remote(rel):
+            return rel
+        return str(self._music_root / rel)
+
+    def _meta(self, rel: str) -> dict:
+        """Library metadata for a stream URL ({} for local files / no lookup)."""
+        if not self.remote_meta or not remote.is_remote(rel):
+            return {}
+        try:
+            return self.remote_meta(rel) or {}
+        except Exception:
+            import logging
+            logging.warning("remote metadata lookup failed", exc_info=True)
+            return {}
 
     @_synchronized
     def _cmd(self, fn) -> None:

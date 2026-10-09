@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pygame
 
+from musi.library import remote
 from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus, QueueItem
@@ -94,8 +95,12 @@ class QueueScreen(ListScreen):
                             theme.WHITE if lifted else (120, 230, 140), size="xs")
         tx = 38
         bold  = lifted or is_cur
-        title = theme.render(item.title, 13, theme.WHITE, bold=bold, max_width=212)
-        surface.blit(title, (tx, y + 8))
+        cloud = remote.is_remote(item.path)
+        title = theme.render(item.title, 13, theme.WHITE, bold=bold,
+                             max_width=212 - (icons.CLOUD_W if cloud else 0))
+        r = surface.blit(title, (tx, y + 8))
+        if cloud:
+            icons.draw_cloud_after(surface, r, theme.WHITE if bold else theme.DIM)
         if item.artist:
             sub = theme.render(item.artist, 10,
                                theme.WHITE if bold else theme.DIM, max_width=212)

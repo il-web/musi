@@ -145,18 +145,19 @@ def test_settings_lists_playback():
 
 
 def test_settings_menu_icons_and_openers_stay_aligned():
-    """MENU, _draw_icon's index chain and _open's index chain are three
-    parallel index-keyed structures. Nothing else catches a mismatch, so
-    inserting a row silently puts the wrong icon on every row below it."""
+    """Every MENU row needs an icon branch and an opener branch. Both are keyed
+    by the row's name, so inserting a row can't shift icons onto the wrong
+    rows — but a new row with no branch would still slip through unnoticed."""
     import inspect
 
     from musi.player.screens import settings
 
     icon_src = inspect.getsource(settings._draw_icon)
     open_src = inspect.getsource(settings.SettingsScreen._open)
-    for i in range(len(settings.MENU)):
-        assert f"index == {i}" in icon_src, f"no icon branch for MENU[{i}]"
-        assert f"_sel == {i}" in open_src, f"no opener branch for MENU[{i}]"
+    for name in settings.MENU:
+        assert f'name == "{name}"' in icon_src, f"no icon branch for {name}"
+    for name in settings.MENU[:-1]:            # the last row is the else branch
+        assert f'name == "{name}"' in open_src, f"no opener branch for {name}"
 
 
 def test_playback_row_opens_the_playback_screen():

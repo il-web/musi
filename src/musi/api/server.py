@@ -12,6 +12,10 @@ includes every guest phone and IoT gadget on the same WiFi.
 
 The API is LAN-only: nothing exposes it to the internet, so the token is the
 whole access boundary.
+
+One exception to the token rule: ``/local/*`` is for processes on the device
+itself (MPD fetching a music-server stream) and answers loopback only — any
+other address gets a 403, token or not.
 """
 from __future__ import annotations
 
@@ -24,9 +28,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, redirect, request, send_file
 
 from musi.api import auth
+from musi.library import remote
 
 PORT = 8080
 AUDIO_EXT = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".opus", ".wma", ".ape"}
@@ -40,6 +45,10 @@ DEFAULT_CORS_ORIGINS = ""
 # The only route that does not require a token. It is the page that prompts for
 # one; it embeds no library data.
 PUBLIC_PATHS = frozenset({"/"})
+
+# Device-internal routes: no token, but loopback callers only (see module doc).
+LOCAL_PREFIX = "/local/"
+LOOPBACK = frozenset({"127.0.0.1", "::1"})
 
 # Login throttle. The token is 8 characters (32**8 ≈ 1.1e12) — short enough to
 # type off the device screen, which is only safe because guessing is throttled.
@@ -411,6 +420,10 @@ def create_app(
     def _gate():
         if request.path in PUBLIC_PATHS:
             return None
+        if request.path.startswith(LOCAL_PREFIX):
+            if request.remote_addr in LOOPBACK:
+                return None
+            return jsonify(error="forbidden"), 403
         if request.method == "OPTIONS":       # CORS preflight carries no auth
             return app.make_default_options_response()
 
@@ -488,6 +501,88 @@ def create_app(
             return jsonify(tracks=0)
 
     # ── /api/v1 (authenticated JSON) ──────────────────────────────────────────
+
+    # ── music server (Subsonic / Navidrome) ───────────────────────────────────
+
+    @app.get("/local/subsonic/stream/<song_id>")
+    def local_subsonic_stream(song_id: str):
+        """MPD's way in to a server song: redirect to the server with fresh
+        credentials. The stream URL MPD stores therefore holds no secret
+        (library/remote.py)."""
+        from musi.library import subsonic
+        settings = subsonic.load_settings()
+        if settings is None:
+            return jsonify(error="no music server set up"), 404
+        client = subsonic.Client.from_settings(settings)
+        return redirect(client.stream_url(
+            song_id, max_bitrate=int(settings.get("max_bitrate") or 0)), 302)
+
+    def _subsonic_state() -> dict:
+        from musi.library import subsonic
+        from musi.library.subsonic_sync import job
+        s = subsonic.load_settings() or {}
+        return {
+            "configured":  bool(s),
+            "url":         s.get("url"),
+            "username":    s.get("username"),
+            "max_bitrate": int(s.get("max_bitrate") or 0),
+            "last_sync":   s.get("last_sync"),
+            "track_count": s.get("track_count", 0),
+            "last_error":  s.get("last_error"),
+            "sync": {"running": job.running, "phase": job.phase,
+                     "done": job.done, "total": job.total,
+                     "error": job.error or None, "stats": job.stats},
+        }
+
+    @app.get("/api/v1/subsonic")
+    def api_subsonic_get():
+        return jsonify(_subsonic_state())
+
+    @app.put("/api/v1/subsonic")
+    def api_subsonic_put():
+        """Set up (or change) the server. The login is checked with a ping
+        before anything is saved, then a first sync starts in the background."""
+        from musi.library import subsonic
+        from musi.library.subsonic_sync import job
+        body = request.get_json(silent=True) or {}
+        url, user = body.get("url", ""), body.get("username", "")
+        password = body.get("password")
+        old = subsonic.load_settings() or {}
+        if password is None and old.get("url") and subsonic.normalize_url(url) == old["url"]:
+            password = old.get("password", "")          # keep the saved one
+        if not url or not user or password is None:
+            return jsonify(error="url, username and password are required"), 400
+        client = subsonic.Client(url, user, password)
+        try:
+            client.ping()
+        except subsonic.SubsonicError as exc:
+            return jsonify(error=str(exc)), 400
+        subsonic.save_settings({
+            "url": client.url, "username": user, "password": password,
+            "max_bitrate": int(body.get("max_bitrate") or old.get("max_bitrate") or 0),
+        })
+        job.start(db_path, art_dir)
+        return jsonify(_subsonic_state())
+
+    @app.delete("/api/v1/subsonic")
+    def api_subsonic_delete():
+        """Sign out: forget the login and every server track."""
+        from musi.library import subsonic
+        from musi.library.subsonic_sync import remove_all
+        subsonic.clear_settings()
+        conn = _db()
+        try:
+            removed = remove_all(conn)
+        finally:
+            conn.close()
+        return jsonify(removed=removed)
+
+    @app.post("/api/v1/subsonic/sync")
+    def api_subsonic_sync():
+        from musi.library.subsonic_sync import job
+        if not job.start(db_path, art_dir) and not job.running:
+            return jsonify(error=job.error or "no music server set up"), 409
+        return jsonify(_subsonic_state()), 202
 
     @app.get("/api/v1/status")
     def api_status():
@@ -619,7 +714,8 @@ def create_app(
         if not row:
             conn.close()
             return jsonify(error="not found"), 404
-        Path(row["path"]).unlink(missing_ok=True)
+        if not remote.is_remote(row["path"]):    # server songs: nothing on disk
+            Path(row["path"]).unlink(missing_ok=True)
         conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
         _prune_orphans(conn)
         conn.commit()
@@ -639,7 +735,8 @@ def create_app(
         tracks = conn.execute(
             "SELECT path FROM tracks WHERE album_id = ?", (album_id,)).fetchall()
         for t in tracks:
-            Path(t["path"]).unlink(missing_ok=True)
+            if not remote.is_remote(t["path"]):
+                Path(t["path"]).unlink(missing_ok=True)
         conn.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
         conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
         _prune_orphans(conn)

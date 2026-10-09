@@ -38,5 +38,10 @@ def api_origins_path() -> Path:
     return Path(os.environ.get("MUSI_API_ORIGINS_PATH", _BASE / "api-origins"))
 
 
+def subsonic_path() -> Path:
+    """Music-server login (URL, user, password) — 0600, see library/subsonic.py."""
+    return Path(os.environ.get("MUSI_SUBSONIC_PATH", _BASE / "subsonic.json"))
+
+
 def prefs_path() -> Path:
     return Path(os.environ.get("MUSI_PREFS_PATH", _BASE / "prefs.json"))

@@ -93,6 +93,7 @@ def albums_missing_art(conn: sqlite3.Connection,
            FROM albums al
            JOIN artists ar ON ar.id = al.artist_id
            JOIN tracks  t  ON t.album_id = al.id
+           WHERE t.path NOT LIKE 'http%'   -- server albums: art comes from the server
            GROUP BY al.id
            ORDER BY ar.name COLLATE NOCASE, al.title COLLATE NOCASE"""
     ).fetchall()

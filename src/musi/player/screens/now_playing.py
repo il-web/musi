@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pygame
 
+from musi.library import remote
 from musi.player import art_cache, audio_detect, icons, motion, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
@@ -67,7 +68,7 @@ class NowPlayingScreen(Screen):
         self._fav:      bool = False
         self._fav_path: str | None = "UNSET"
 
-        self._prev_title:   str = ""
+        self._prev_title:   tuple = ("", False)   # (title, streamed?)
         self._prev_meta:    str = ""
         self._prev_elapsed: int = -1   # whole seconds
 
@@ -347,10 +348,17 @@ class NowPlayingScreen(Screen):
         """Re-render text surfaces only when content changes."""
         title = status.title or "musi"
         meta  = f"{status.artist}" + (f"  ·  {status.album}" if status.album else "")
+        cloud = remote.is_remote(status.path)
+        key   = (title, cloud)     # same title, other source
 
-        if title != self._prev_title:
-            self._prev_title  = title
-            self._title_surf  = theme.render(title, 18, theme.WHITE, bold=True, max_width=296)
+        if key != self._prev_title:
+            self._prev_title  = key
+            self._title_surf  = theme.render(
+                title, 18, theme.WHITE, bold=True,
+                max_width=296 - (icons.CLOUD_W if cloud else 0))
+            if cloud:
+                # baked in, so the shadow and the track-change slide carry it
+                self._title_surf = icons.with_cloud(self._title_surf, theme.WHITE)
 
         if meta != self._prev_meta:
             self._prev_meta  = meta

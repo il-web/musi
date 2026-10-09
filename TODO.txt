@@ -186,6 +186,29 @@ DONE
       the zoom's full-frame smoothscale cost on the Pi 3. If zoom drags,
       set the launcher's scr.transition to "fade"
 
+[x] Music server pack (Navidrome / any Subsonic server)
+    - library/subsonic.py: stdlib client, salted-token auth (password never
+      sent), login in ~/.local/share/musi/subsonic.json (0600)
+    - library/subsonic_sync.py: catalog mirrored into the normal tables
+      (metadata only — audio streams). Local wins on artist+album+title
+      dupes, albums merge with local ones, server covers go through the
+      usual art pipeline, songs gone from the server are dropped. search3
+      paging, getAlbum walk as fallback
+    - Server tracks' path = http://127.0.0.1:8080/local/subsonic/stream/<id>
+      (library/remote.py). musi-api answers that loopback-only route with a
+      302 to the server + fresh token, so MPD/DB/playlists hold no secret.
+      Scanner + artwork fetcher skip these rows; mpd_client passes URLs
+      through and fills title/artist/duration from the library
+    - Cloud tag next to the title: album/search/playlist/queue rows, mini
+      bar, Now Playing. Plays scrobble back to the server
+    - Settings -> Music Server (URL / user / password, Connect = ping then
+      save then sync; Sync now; Sign out removes server tracks). Phone/web:
+      GET/PUT/DELETE /api/v1/subsonic, POST /api/v1/subsonic/sync
+    - STILL NEEDS an on-device check: MPD following the 302 (curl input
+      plugin), seeking within a raw stream, and a first sync of the real
+      library (time + cover download). Possible follow-ups: auto-sync at
+      boot, "download for offline", max-bitrate setting on the device
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

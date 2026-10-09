@@ -9,6 +9,7 @@ import random
 
 import pygame
 
+from musi.library import remote
 from musi.player import audio_detect, icons, minibar, statusbar, theme
 from musi.player.input import Button
 from musi.player.list_screen import ListScreen
@@ -112,9 +113,12 @@ class PlaylistScreen(ListScreen):
         pygame.draw.rect(surface, theme.ACCENT if lifted else theme.CARD_BG,
                          rect, border_radius=7)
 
+        cloud = remote.is_remote(t.get("path"))
         title = theme.render(t["title"], 13, theme.WHITE, bold=lifted,
-                             max_width=232)
-        surface.blit(title, (16, y + 8))
+                             max_width=232 - (icons.CLOUD_W if cloud else 0))
+        r = surface.blit(title, (16, y + 8))
+        if cloud:
+            icons.draw_cloud_after(surface, r, theme.WHITE if lifted else theme.DIM)
         if t.get("artist"):
             sub = theme.render(t["artist"], 10,
                                theme.WHITE if lifted else theme.DIM, max_width=232)

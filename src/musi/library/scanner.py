@@ -48,9 +48,12 @@ def scan(
     print(f"  Found {len(disk)} audio files on disk")
 
     # ── 2. remove tracks that disappeared from disk ───────────────────────────
+    # Server-streamed tracks (stream URLs, see remote.py) are never on disk —
+    # they belong to subsonic_sync, so the scanner must not even see them.
     db_rows = {
         row["path"]: row["file_mtime"]
-        for row in conn.execute("SELECT path, file_mtime FROM tracks")
+        for row in conn.execute(
+            "SELECT path, file_mtime FROM tracks WHERE path NOT LIKE 'http%'")
     }
     removed = set(db_rows) - set(disk)
     for path_str in removed:

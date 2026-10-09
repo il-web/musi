@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pygame
 
+from musi.library import remote, subsonic
 from musi.player import backlight, motion, theme
 from musi.player.input import Button, key_to_button
 from musi.player.gestures import EDGE_W, resolve_edge_swipe
@@ -68,6 +69,9 @@ class App:
         self._transition:      Transition | None = None
         self._frame_no:        int          = 0      # frames drawn — see _begin_transition
         self._frame:           pygame.Surface | None = None   # offscreen, for transitions
+        self._remote_meta:     dict[str, dict | None] = {}
+        if mpd is not None:
+            mpd.remote_meta = self._lookup_remote
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -485,3 +489,24 @@ class App:
         if self._status.state == "play" and path and path != self._last_track_path:
             self._mpd.record_play(self._db, path)
             self._last_track_path = path
+            if remote.is_remote(path):
+                subsonic.scrobble_async(path)
+
+    def _lookup_remote(self, url: str) -> dict | None:
+        """Library tags for a server stream — MPD often has none for a URL.
+
+        Memoised: the poll asks every second, and the render loop must not
+        hit the database per frame (see tests/test_draw_loop_cost.py).
+        """
+        if self._remote_meta.get(url) is None:   # misses retry: a sync may add it
+            row = None
+            if self._db is not None:
+                row = self._db.execute(
+                    """SELECT t.title, ar.name AS artist, al.title AS album, t.duration
+                       FROM tracks t JOIN albums al ON al.id = t.album_id
+                       JOIN artists ar ON ar.id = al.artist_id
+                       WHERE t.path = ?""", (url,)).fetchone()
+            if len(self._remote_meta) > 500:
+                self._remote_meta.clear()
+            self._remote_meta[url] = dict(row) if row else None
+        return self._remote_meta[url]

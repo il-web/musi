@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pygame
 
+from musi.library import remote
 from musi.player import audio_detect, icons, statusbar, theme
 from musi.player.input import Button
 from musi.player.keyboard import Keyboard
@@ -224,9 +225,12 @@ class SearchScreen(ListScreen):
         )
 
         # title
-        title_s = theme.render(res.title, 13, theme.WHITE,
-                               bold=sel, max_width=278)
-        surface.blit(title_s, (16, y + 8))
+        cloud = remote.is_remote(res.path)
+        title_s = theme.render(res.title, 13, theme.WHITE, bold=sel,
+                               max_width=278 - (icons.CLOUD_W if cloud else 0))
+        r = surface.blit(title_s, (16, y + 8))
+        if cloud:
+            icons.draw_cloud_after(surface, r, theme.WHITE if sel else theme.DIM)
 
         # artist · album subtitle
         if res.artist and res.album:
