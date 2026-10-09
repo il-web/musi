@@ -414,3 +414,34 @@ def test_server_screen_offers_sync_once_saved():
     assert scr.summary()[0].startswith("42 songs")
     scr.draft["url"] = "http://other"
     assert scr._action() == ("Connect", True)
+
+
+# ── background sync ───────────────────────────────────────────────────────────
+
+from musi.library import subsonic_sync as ss  # noqa: E402
+
+H = 3600
+
+
+@pytest.mark.parametrize("settings,now,uptime,due", [
+    (None,                                   10 * H, 10 * H, False),  # no server
+    ({"url": "x", "last_sync": 0},           10 * H, 60,     False),  # just booted
+    ({"url": "x", "last_sync": 0},           10 * H, 10 * H, True),
+    ({"url": "x", "last_sync": 9 * H},       10 * H, 10 * H, False),  # synced 1 h ago
+    ({"url": "x", "last_sync": 0, "last_auto_try": 10 * H - 60}, 10 * H, 10 * H, False),
+    ({"url": "x", "last_sync": 0, "last_auto_try": 9 * H},       10 * H, 10 * H, True),
+    ({"url": "x", "last_sync": 0, "auto_sync": False},           10 * H, 10 * H, False),
+])
+def test_auto_sync_schedule(settings, now, uptime, due):
+    assert ss.auto_due(settings, now, uptime) is due
+
+
+def test_maybe_auto_sync_records_the_attempt(tmp_path, monkeypatch):
+    subsonic.save_settings({"url": "http://nas", "username": "me", "password": "pw"})
+    started = []
+    monkeypatch.setattr(ss.job, "start", lambda db, art: started.append(db) or True)
+    assert ss.maybe_auto_sync(tmp_path / "db", tmp_path / "art", uptime=10 * H, now=10 * H)
+    assert started and subsonic.load_settings()["last_auto_try"] == 10 * H
+    # a minute later it is not due again, even though no sync has succeeded
+    assert not ss.maybe_auto_sync(tmp_path / "db", tmp_path / "art",
+                                  uptime=10 * H + 60, now=10 * H + 60)

@@ -29,6 +29,11 @@ from musi.library.subsonic import Client, SubsonicError, update_settings
 
 BATCH = 200
 
+# Background sync (the player calls maybe_auto_sync about once a minute)
+AUTO_EVERY_S = 6 * 3600     # re-sync this often
+AUTO_RETRY_S = 30 * 60      # after a failed attempt (offline, server down)
+AUTO_FIRST_S = 120          # after boot: let playback settle first
+
 log = logging.getLogger(__name__)
 
 Progress = Optional[Callable[[str, int, int], None]]   # (phase, done, total)
@@ -263,6 +268,7 @@ class SyncJob:
 
         def work() -> None:
             conn = None
+            _lower_priority()
             try:
                 conn = open_db(db_path)
                 self.stats = sync(client, conn, art_dir, progress=report)
@@ -290,3 +296,35 @@ class SyncJob:
 
 
 job = SyncJob()     # this process's sync
+
+
+def _lower_priority() -> None:
+    """Nice this worker thread (Linux: threads are tasks with their own
+    priority) so a big sync never takes CPU from the render loop."""
+    import os
+    import threading
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 10)
+    except (AttributeError, OSError):
+        pass
+
+
+def auto_due(settings: dict | None, now: float, uptime: float) -> bool:
+    """Is a background sync due? Never during the first minutes after boot;
+    every AUTO_EVERY_S after the last success; failures retry sooner."""
+    if not settings or settings.get("auto_sync") is False or uptime < AUTO_FIRST_S:
+        return False
+    since_sync = now - (settings.get("last_sync") or 0)
+    since_try = now - (settings.get("last_auto_try") or 0)
+    return since_sync >= AUTO_EVERY_S and since_try >= AUTO_RETRY_S
+
+
+def maybe_auto_sync(db_path: Path, art_dir: Path, uptime: float,
+                    now: float | None = None) -> bool:
+    """Start a background sync if one is due. Returns True if it started."""
+    from musi.library.subsonic import load_settings
+    now = time.time() if now is None else now
+    if job.running or not auto_due(load_settings(), now, uptime):
+        return False
+    update_settings(last_auto_try=int(now))
+    return job.start(db_path, art_dir)

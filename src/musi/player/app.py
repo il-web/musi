@@ -72,6 +72,7 @@ class App:
         self._frame_no:        int          = 0      # frames drawn — see _begin_transition
         self._frame:           pygame.Surface | None = None   # offscreen, for transitions
         self._remote_meta:     dict[str, dict | None] = {}
+        self._last_bg:         float        = 0.0    # last background-jobs tick
         # called once, after the first frame reaches the panel (crashguard)
         self.first_frame_hook: "Callable[[], None] | None" = None
         if mpd is not None:
@@ -268,6 +269,11 @@ class App:
                 self._last_poll = now
                 self._poll_time = now
                 self._maybe_record_play()
+
+            # ── background jobs (once a minute) ───────────────────────────────
+            if now - self._last_bg >= 60.0:
+                self._last_bg = now
+                self._background(now)
 
             # ── sleep timer ───────────────────────────────────────────────────
             if self._sleep_at is not None and now >= self._sleep_at:
@@ -501,6 +507,18 @@ class App:
             self._last_track_path = path
             if remote.is_remote(path):
                 subsonic.scrobble_async(path)
+
+    def _background(self, uptime: float) -> None:
+        """Once-a-minute housekeeping. Each job decides for itself whether it
+        is due and does its real work on its own thread."""
+        try:
+            from musi.library import config, subsonic_sync
+            from musi.player import hardening
+            # under the storage lock every write evaporates at reboot
+            if not hardening.overlay_active():
+                subsonic_sync.maybe_auto_sync(config.db_path(), self._art_dir, uptime)
+        except Exception:
+            logging.warning("background tick failed", exc_info=True)
 
     def _lookup_remote(self, url: str) -> dict | None:
         """Library tags for a server stream — MPD often has none for a URL.
