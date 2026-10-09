@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=9
+LATEST_STEP=10
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -297,6 +297,21 @@ root_9() {
 
     "$sysctl" disable NetworkManager-wait-online.service 2>/dev/null || true
     return 0
+}
+
+# ── step 10: AirPlay over Bluetooth fix (2026-10-09) ──────────────────────────
+# Pausing on the phone and resuming played back broken audio over the
+# AirPods: the Bluetooth output ran dry right after the resume. Bigger
+# start-up cushion + Bluetooth-friendly ALSA settings in the config, and the
+# unit drops the BlueALSA debug flood from the log. User files only.
+user_10() {
+    mkdir -p "$HOME/.config/musi" "$HOME/.config/systemd/user"
+    sed "s|@HOME@|$HOME|g" "$REPO/pi/shairport-sync.conf" > "$HOME/.config/musi/shairport-sync.conf"
+    install -m 0644 "$REPO/pi/musi-airplay.service" "$HOME/.config/systemd/user/musi-airplay.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    if command -v shairport-sync > /dev/null; then
+        systemctl --user restart musi-airplay 2>/dev/null || true
+    fi
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════

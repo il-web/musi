@@ -9,6 +9,10 @@ ConditionPathExists=/usr/bin/shairport-sync
 
 [Service]
 ExecStart=/usr/bin/shairport-sync -c %h/.config/musi/shairport-sync.conf
+# shairport-sync's own messages go to syslog (its default). stderr only
+# carries the BlueALSA plugin's debug chatter, thousands of lines a minute,
+# which rotated the RAM journal before an AirPlay problem could be read.
+StandardError=null
 Restart=always
 RestartSec=3
 
