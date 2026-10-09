@@ -155,3 +155,41 @@ def test_the_power_pack_stays_step_five() -> None:
     m = re.search(r"^LATEST_STEP=(\d+)", text, re.M)
     assert m, "update.sh has no LATEST_STEP"
     assert int(m.group(1)) >= 5, "LATEST_STEP is below the power pack's step"
+
+
+# ── step 9: faster boot ───────────────────────────────────────────────────────
+
+def _run_root_9(root: Path, log: Path) -> str:
+    """The real root_9 against a fake root and a systemctl that only logs."""
+    fake = root / "fake-systemctl"
+    fake.write_text(f'#!/bin/sh\necho "$@" >> "{str(log).replace(chr(92), "/")}"\n')
+    fake.chmod(0o755)
+    body = _extract_function(UPDATE_SH.read_text(encoding="utf-8"), "root_9")
+    script = f"set -eu\n{body}\nroot_9 \"$1\" \"$2\"\nroot_9 \"$1\" \"$2\"\n"
+    proc = subprocess.run([BASH, "-c", script, "bash",
+                           str(root).replace("\\", "/"), str(fake).replace("\\", "/")],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    return log.read_text() if log.exists() else ""
+
+
+@needs_bash
+def test_boot_trim_disables_cloud_init_cloudflared_and_the_network_wait(tmp_path):
+    lists = tmp_path / "etc" / "apt" / "sources.list.d"
+    lists.mkdir(parents=True)
+    (lists / "cloudflared.list").write_text("deb https://pkg.cloudflare.com/cloudflared any main\n")
+    (lists / "raspi.list").write_text("deb http://archive.raspberrypi.com/debian/ trixie main\n")
+    calls = _run_root_9(tmp_path, tmp_path / "calls.log")
+    assert (tmp_path / "etc" / "cloud" / "cloud-init.disabled").exists()
+    assert "disable --now cloudflared.service" in calls
+    assert "mask cloudflared.service" in calls
+    assert "disable NetworkManager-wait-online.service" in calls
+    assert not (lists / "cloudflared.list").exists()
+    assert (lists / "raspi.list").exists()                  # others untouched
+
+
+def test_install_sh_mirrors_the_boot_trim():
+    text = INSTALL_SH.read_text(encoding="utf-8")
+    for needle in ("cloud-init.disabled", "disable --now cloudflared.service",
+                   "mask cloudflared.service", "disable NetworkManager-wait-online.service"):
+        assert needle in text, needle

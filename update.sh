@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=8
+LATEST_STEP=9
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -263,6 +263,40 @@ user_8() {
         return 0
     fi
     systemctl --user restart musi-airplay 2>/dev/null || true
+}
+
+# ── step 9: faster boot (2026-10-09) ──────────────────────────────────────────
+# Measured on the device (systemd-analyze): 33.6 s to multi-user, and the
+# musi UI only starts after the user manager — which waited on cloud-init.
+#   - cloud-init: Raspberry Pi Imager's first-boot setup. Long done; ~4-6 s
+#     on the path to the UI every boot.
+#   - cloudflared: the remote tunnel was retired 2026-08-25 (API pack 3) but
+#     the service was left enabled: 5.6 s, and it dragged in the network wait.
+#   - NetworkManager-wait-online: 5.2 s; nothing needs it once the two above
+#     are gone. Wi-Fi still connects exactly as before — boot just doesn't
+#     sit and wait for it.
+user_9() {
+    say "boot trimmed — takes effect at the next reboot"
+}
+
+root_9() {
+    # Optional args, for tests: a root dir to work under and a systemctl
+    # stand-in. Real runs take the defaults.
+    root="${1:-}"
+    sysctl="${2:-systemctl}"
+
+    mkdir -p "$root/etc/cloud"
+    touch "$root/etc/cloud/cloud-init.disabled"
+
+    "$sysctl" disable --now cloudflared.service 2>/dev/null || true
+    "$sysctl" mask cloudflared.service 2>/dev/null || true
+    # its apt source too: apt update would keep hitting pkg.cloudflare.com
+    for f in "$root"/etc/apt/sources.list.d/*.list; do
+        [ -f "$f" ] && grep -q 'pkg.cloudflare.com' "$f" && rm -f "$f"
+    done
+
+    "$sysctl" disable NetworkManager-wait-online.service 2>/dev/null || true
+    return 0
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════

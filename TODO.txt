@@ -358,6 +358,17 @@ DONE
       back swipe. "Next: <title>" under the bar (queue, once per track;
       hidden when shuffled / radio / AirPlay)
 
+[x] Faster boot (update.sh step 9, ROOT — needs one manual install.sh)
+    - Measured 2026-10-09: 33.6 s (5.6 kernel + 28 userspace); the musi UI
+      waits for the user manager (~23.7 s), which waited on cloud-init
+    - root_9: /etc/cloud/cloud-init.disabled; cloudflared disabled + masked
+      + its apt source removed (tunnel retired 2026-08-25 but the service
+      was still enabled: 5.6 s); NetworkManager-wait-online disabled (5.2 s,
+      only wanted by those two). install.sh 9a mirrors it; test runs the
+      real root_9 against a fake root
+    - NOT done: kernel (5.6 s) and NetworkManager start (5.1 s) — measure
+      again after this lands before touching those
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

@@ -417,6 +417,16 @@ sudo systemctl reload NetworkManager 2>/dev/null || true
 # toggled from Settings -> Power on the device (raspi-config nonint
 # do_overlayfs, allowed via the sudoers rule above) and applies after reboot.
 
+# ── 9a. faster boot (mirrors update.sh step 9) ───────────────────────────────
+# cloud-init is Raspberry Pi Imager's first-boot setup, finished by now;
+# NetworkManager-wait-online only held boot up for services musi doesn't use.
+say "Trimming boot"
+sudo mkdir -p /etc/cloud
+sudo touch /etc/cloud/cloud-init.disabled
+sudo systemctl disable --now cloudflared.service 2>/dev/null || true
+sudo systemctl mask cloudflared.service 2>/dev/null || true
+sudo systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
+
 # ── 9b. AirPlay receiver (shairport-sync as a user service) ───────────────────
 # Mirrors update.sh step 8. The package's own system service would run as its
 # own user with the default ALSA device — it can't reach ~/.asoundrc (DAC or
