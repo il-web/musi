@@ -6,10 +6,12 @@ stalled.  Results are cached for _INTERVAL seconds.
 from __future__ import annotations
 
 import platform
+import shutil
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 # ── module state ──────────────────────────────────────────────────────────────
 _lock          = threading.Lock()
@@ -75,8 +77,30 @@ def _windows() -> str:
     return "unknown"
 
 
+def _route_from_asoundrc(path: Path | None = None) -> str | None:
+    """Where musi-bt-router is sending audio right now, or None if unknown.
+
+    The router owns ~/.asoundrc and rewrites its pcm.musiout slave on every
+    switch, so it is the ground truth — no subprocess, and unlike asking
+    bluetoothctl it isn't fooled by a connected BT keyboard or phone.
+    """
+    try:
+        text = (path or Path.home() / ".asoundrc").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if "bluealsa:" in text:
+        return "bluetooth"
+    if '"hw:' in text or '"plughw:' in text:
+        return "wired"
+    return None
+
+
 def _linux() -> str:
-    """Detect BT via bluetoothctl or pactl; fall back to ALSA for wired."""
+    """The router's ~/.asoundrc first; else bluetoothctl / pactl / ALSA."""
+    route = _route_from_asoundrc()
+    if route:
+        return route
+
     # 1 — bluetoothctl: quick check for a connected device
     try:
         r = subprocess.run(
@@ -89,8 +113,11 @@ def _linux() -> str:
         import logging
         logging.warning('Ignored exception', exc_info=True)
 
-    # 2 — PulseAudio / PipeWire: check sinks
+    # 2 — PulseAudio / PipeWire: check sinks (musi's own image has neither —
+    # don't spawn, fail and log a traceback every 15 s when it isn't there)
     try:
+        if shutil.which("pactl") is None:
+            raise FileNotFoundError("pactl")
         r = subprocess.run(
             ["pactl", "list", "sinks"],
             capture_output=True, text=True, timeout=3,
@@ -99,6 +126,8 @@ def _linux() -> str:
             return "bluetooth"
         if r.returncode == 0 and r.stdout.strip():
             return "wired"
+    except FileNotFoundError:
+        pass
     except Exception:
         import logging
         logging.warning('Ignored exception', exc_info=True)
