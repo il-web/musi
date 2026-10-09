@@ -368,6 +368,15 @@ DONE
       real root_9 against a fake root
     - NOT done: kernel (5.6 s) and NetworkManager start (5.1 s) — measure
       again after this lands before touching those
+    - APPLIED on the device 2026-10-09 (root helper refreshed to level 9 over
+      SSH): boot 33.6 s -> 19.6 s to multi-user (userspace 28.0 -> 14.0 s),
+      Wi-Fi fine. musi-ui process starts ~25 s, first frame ~30 s: the rest
+      is musi's own startup (imports, DB, MPD) — next thing to optimise
+    - DEVICE NOTE: apt now uses http://archive.raspbian.org/raspbian/ in
+      /etc/apt/sources.list.d/raspbian.sources (original kept as
+      raspbian.sources.musi-backup) — raspbian.raspberrypi.com redirected
+      Israeli clients to mirror.isoc.org.il, which refused connections.
+      AirPlay installed the same day: musi-airplay active, MPRIS on the bus
 
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
