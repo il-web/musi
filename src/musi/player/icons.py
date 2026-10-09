@@ -65,13 +65,20 @@ def draw_music_note(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> No
 
 
 def draw_heart(surface: pygame.Surface, cx: int, cy: int, col: tuple,
-               filled: bool = False) -> None:
-    """Heart glyph — two lobes over a point. Filled when favourited."""
-    r = 4
-    lobe_l = (cx - r + 1, cy - 3)
-    lobe_r = (cx + r - 1, cy - 3)
-    point  = (cx, cy + 7)
-    body   = [lobe_l, (cx - 2 * r, cy - 1), point, (cx + 2 * r, cy - 1), lobe_r]
+               filled: bool = False, scale: float = 1.0) -> None:
+    """Heart glyph — two lobes over a point. Filled when favourited.
+
+    ``scale`` grows it in place (Now Playing's favourite bump); drawn as
+    shapes at the new size rather than a rescaled bitmap.
+    """
+    def k(v: float) -> int:
+        return round(v * scale)
+
+    r = max(1, k(4))
+    lobe_l = (cx - r + 1, cy - k(3))
+    lobe_r = (cx + r - 1, cy - k(3))
+    point  = (cx, cy + k(7))
+    body   = [lobe_l, (cx - 2 * r, cy - k(1)), point, (cx + 2 * r, cy - k(1)), lobe_r]
     if filled:
         pygame.draw.circle(surface, col, lobe_l, r)
         pygame.draw.circle(surface, col, lobe_r, r)
@@ -80,7 +87,8 @@ def draw_heart(surface: pygame.Surface, cx: int, cy: int, col: tuple,
         pygame.draw.circle(surface, col, lobe_l, r, 2)
         pygame.draw.circle(surface, col, lobe_r, r, 2)
         pygame.draw.lines(surface, col, False,
-                          [(cx - 2 * r + 1, cy - 1), point, (cx + 2 * r - 1, cy - 1)], 2)
+                          [(cx - 2 * r + 1, cy - k(1)), point,
+                           (cx + 2 * r - 1, cy - k(1))], 2)
 
 
 CLOUD_W = 16    # room to leave after a title for draw_cloud_after()

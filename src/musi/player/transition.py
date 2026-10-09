@@ -97,7 +97,9 @@ class Transition:
         x = int(W * (1 - shown))
         out.blit(over, (x, 0))
         if x > 0:
-            out.blit(_edge_shadow(), (x - _edge_shadow().get_width(), 0))
+            # even column: a per-pixel-alpha blit at an odd x can SIGBUS on
+            # the Pi (blit.py) — a pixel of shadow drift is invisible
+            out.blit(_edge_shadow(), ((x - _edge_shadow().get_width()) & ~1, 0))
         _fixed_bar(out, under, over, shown)
 
     def _sheet(self, out, under, over, shown) -> None:

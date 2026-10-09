@@ -280,3 +280,59 @@ def test_the_switch_toggles_the_pref():
     assert prefs.get("animations") is False
     scr.handle_touch(*customization.MOTION_ROW.center)
     assert prefs.get("animations") is True
+
+
+# ── device safety ─────────────────────────────────────────────────────────────
+
+class _RecordingSurface(pygame.Surface):
+    """Records every blit of a per-pixel-alpha source and its x."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.alpha_blits = []
+
+    def blit(self, source, dest, *a, **k):
+        if source.get_flags() & pygame.SRCALPHA:
+            x = dest[0] if not isinstance(dest, pygame.Rect) else dest.x
+            self.alpha_blits.append((source.get_size(), x))
+        return super().blit(source, dest, *a, **k)
+
+
+def test_play_pause_pop_and_ripples_use_no_layers_or_rescaling(monkeypatch):
+    """The first pop/ripple drew into transparent layers and smoothscaled them:
+    fine on x86, a process-killing crash on the Pi the moment play/pause was
+    tapped. They must draw plain shapes onto the frame."""
+    from musi.player.input import Button
+
+    def no_smoothscale(*a, **k):
+        raise AssertionError("smoothscale in the Now Playing animation path")
+    monkeypatch.setattr(pygame.transform, "smoothscale", no_smoothscale)
+
+    scr, app = _np()
+    plain = pygame.Surface((320, 480))
+    scr.draw(plain, app.status)                     # settle the first frame
+    scr.handle(Button.PLAY_PAUSE, app.status)       # ripple
+    app.status.state = "pause"                      # → pop
+    scr._toggle_favorite()                          # → heart bump
+    surf = _RecordingSurface((320, 480))
+    before = len(surf.alpha_blits)
+    for _ in range(3):
+        scr.draw(surf, app.status)
+    assert scr._ripple.active() and scr._pp_pop.active() and scr._heart.active()
+    # nothing new beyond the screen's ordinary text blits: count per frame
+    # must match a frame with no motion at all
+    animated = len(surf.alpha_blits) - before
+    still = _RecordingSurface((320, 480))
+    scr._ripple.stop(); scr._pp_pop.stop(); scr._heart.stop()
+    for _ in range(3):
+        scr.draw(still, app.status)
+    assert animated == len(still.alpha_blits)
+
+
+def test_slide_edge_shadow_lands_on_an_even_column():
+    old, new = _solid(RED), _solid(BLUE)
+    for frac in (0.1, 0.33, 0.5, 0.77):
+        t = Transition("slide", True, old, now=0.0)
+        out = _RecordingSurface((320, 480))
+        t.compose(out, new, now=transition.DURATIONS["slide"] * frac)
+        assert all(x % 2 == 0 for _, x in out.alpha_blits), out.alpha_blits

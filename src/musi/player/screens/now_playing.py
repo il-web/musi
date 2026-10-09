@@ -404,42 +404,55 @@ def _text(surface: pygame.Surface, surf: pygame.Surface | None, y: int,
         _shadow(surface, surf, r.x, r.y)
         surface.blit(surf, r)
         return
+    # mid-slide: even columns only, for the same ARM reason as blit.py
+    x = r.x & ~1
     shadow = surf.copy()
     shadow.fill((0, 0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-    motion.blit_alpha(surface, shadow, (r.x + 2, r.y + 2), a)
-    motion.blit_alpha(surface, surf, r, a)
+    motion.blit_alpha(surface, shadow, (x + 2, r.y + 2), a)
+    motion.blit_alpha(surface, surf, (x, r.y), a)
 
+
+# The pop and ripple below draw straight onto the frame with plain shapes —
+# no per-pixel-alpha layer, no smoothscale. The first version rendered into a
+# transparent layer and rescaled it; on the Pi (armv7) that killed the whole
+# process the moment play/pause was tapped, while every desktop test passed.
+# Same family as blit.py: SDL's ARM fast paths fault where x86 never does.
 
 def _draw_ripple(surface, at, p, colour) -> None:
-    """An expanding, fading disc behind a tapped control."""
+    """An expanding ring behind a tapped control, fading into the panel.
+
+    Faded by mixing toward the panel colour instead of alpha — exact here,
+    since both control rows sit on the solid panel below the art.
+    """
     e = motion.ease_out_cubic(p)
-    r = int(motion.lerp(12, 30, e))
-    disc = pygame.Surface((2 * r + 2, 2 * r + 2), pygame.SRCALPHA)
-    pygame.draw.circle(disc, (*colour[:3], int(80 * (1 - e))), (r + 1, r + 1), r)
-    surface.blit(disc, (at[0] - r - 1, at[1] - r - 1))
-
-
-def _scaled_icon(surface, cx, cy, scale, size, draw) -> None:
-    """Draw an icon at ``scale`` by rendering it into a small layer first."""
-    if abs(scale - 1.0) < 0.01:
-        draw(surface, cx, cy)
-        return
-    layer = pygame.Surface((size, size), pygame.SRCALPHA)
-    draw(layer, size // 2, size // 2)
-    n = max(2, int(size * scale))
-    layer = pygame.transform.smoothscale(layer, (n, n))
-    surface.blit(layer, (cx - n // 2, cy - n // 2))
+    r = int(motion.lerp(14, 30, e))
+    col = motion.lerp_colour(theme.BG, colour, 0.55 * (1 - e))
+    pygame.draw.circle(surface, col, at, r, 2)
 
 
 def _draw_play_pause(surface, playing: bool, colour, scale: float) -> None:
-    def draw(s, x, y):
-        (icons.draw_pause if playing else icons.draw_play)(s, x, y, colour, size="lg")
-    _scaled_icon(surface, 160, CTRL_Y, scale, 40, draw)
+    """The large play/pause glyph (icons.py, size "lg") drawn at ``scale``."""
+    if abs(scale - 1.0) < 0.01:
+        (icons.draw_pause if playing else icons.draw_play)(
+            surface, 160, CTRL_Y, colour, size="lg")
+        return
+    cx, cy = 160, CTRL_Y
+
+    def k(v: float) -> int:
+        return round(v * scale)
+
+    if playing:
+        for x0 in (-9, 3):
+            pygame.draw.rect(surface, colour, (cx + k(x0), cy - k(11), max(1, k(6)),
+                                               max(1, k(22))), border_radius=2)
+    else:
+        pygame.draw.polygon(surface, colour, [(cx - k(9), cy - k(13)),
+                                              (cx - k(9), cy + k(13)),
+                                              (cx + k(13), cy)])
 
 
 def _draw_heart(surface, cx, cy, colour, filled: bool, scale: float) -> None:
-    _scaled_icon(surface, cx, cy, scale, 28,
-                 lambda s, x, y: icons.draw_heart(s, x, y, colour, filled=filled))
+    icons.draw_heart(surface, cx, cy, colour, filled=filled, scale=scale)
 
 
 def _shadow(surface: pygame.Surface, surf: pygame.Surface, x: int, y: int, offset: int = 2) -> None:
