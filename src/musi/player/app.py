@@ -10,11 +10,12 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import backlight, theme
+from musi.player import backlight, motion, theme
 from musi.player.input import Button, key_to_button
 from musi.player.gestures import EDGE_W, resolve_edge_swipe
 from musi.player.mpd_client import MusiMPDClient, PlayerStatus
 from musi.player.screen import Screen
+from musi.player.transition import Transition
 
 # ── constants ─────────────────────────────────────────────────────────────────
 DISPLAY_W, DISPLAY_H = 320, 480   # matches ST7796 — draw at this resolution
@@ -64,6 +65,9 @@ class App:
         self._running:         bool         = False
         self._last_track_path: str | None   = None
         self._sleep_at:        float | None = None   # sleep timer deadline (ticks s)
+        self._transition:      Transition | None = None
+        self._frame_no:        int          = 0      # frames drawn — see _begin_transition
+        self._frame:           pygame.Surface | None = None   # offscreen, for transitions
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -83,14 +87,39 @@ class App:
     def push(self, screen: Screen) -> None:
         if self._stack:
             self._stack[-1].on_exit()
+            self._begin_transition(screen.transition, forward=True)
         self._stack.append(screen)
         screen.on_enter()
 
     def pop(self) -> None:
         if len(self._stack) > 1:
+            self._begin_transition(self._stack[-1].transition, forward=False)
             self._stack[-1].on_exit()
             self._stack.pop()
             self._stack[-1].on_enter()
+
+    @property
+    def transitioning(self) -> bool:
+        return self._transition is not None
+
+    def _begin_transition(self, kind: str, forward: bool) -> None:
+        """Snapshot the frame on the panel and animate away from it.
+
+        Several pushes/pops inside one frame (go_home, a menu that pops and
+        then pushes) become one transition: the snapshot is still what the
+        user was looking at, and the last call decides the kind.
+        """
+        if not self._running or not motion.enabled():
+            return
+        t = self._transition
+        if t is not None and t.frame_no == self._frame_no:
+            t.retarget(kind, forward)
+            return
+        display = pygame.display.get_surface()
+        if display is None:
+            return
+        self._transition = Transition(kind, forward, display.copy())
+        self._transition.frame_no = self._frame_no
 
     def go_home(self) -> None:
         """Pop every screen above the root launcher.
@@ -333,9 +362,8 @@ class App:
                     ),
                 )
 
-            surface.fill((10, 10, 15))
-            if self._stack:
-                self._stack[-1].draw(surface, draw_status)
+            self._draw_stack(surface, draw_status)
+            self._frame_no += 1
 
             self._draw_bt_overlay(surface)
 
@@ -358,6 +386,7 @@ class App:
                 idle < ACTIVE_WINDOW_S
                 or self._captured
                 or self._touch_start is not None
+                or self._transition is not None
             )
             clock.tick(
                 ACTIVE_FPS if (interacting or top_animates or self._bt_active)
@@ -367,6 +396,28 @@ class App:
         backlight.set_on(True)             # don't strand the panel dark on exit
         self._mpd.disconnect()
         pygame.quit()
+
+    def _draw_stack(self, surface: pygame.Surface, status: PlayerStatus) -> None:
+        """Draw the top screen — through the running transition, if any.
+
+        Screens always draw offscreen and the result is copied over, so the
+        display keeps the last finished frame for the whole draw. That matters
+        because most taps push from *inside* draw (PendingTap fires there):
+        the transition snapshot taken at that moment must be the frame the
+        user saw, not a half-redrawn one. The extra copy is one 320×480 blit.
+        """
+        if self._frame is None:
+            self._frame = pygame.Surface(surface.get_size()).convert()
+        t = self._transition
+        if t is not None and not t.active():
+            t = self._transition = None
+        self._frame.fill((10, 10, 15))
+        if self._stack:
+            self._stack[-1].draw(self._frame, status)
+        if t is None:
+            surface.blit(self._frame, (0, 0))
+        else:
+            t.compose(surface, self._frame)
 
     # ── unified touch/mouse gesture flow ──────────────────────────────────────
 

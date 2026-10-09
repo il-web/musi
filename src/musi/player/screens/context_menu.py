@@ -10,7 +10,7 @@ from typing import Callable
 
 import pygame
 
-from musi.player import theme
+from musi.player import motion, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -20,9 +20,11 @@ CARD_W  = 264
 ROW_H   = 52
 PAD     = 10
 TITLE_H = 40
+RISE_PX = 18        # the card settles up into place as it fades in
 
 
 class ContextMenuScreen(Screen):
+    transition = "fade"         # the dim + card fade in over the parent
 
     def __init__(self, app, title: str,
                  options: list[tuple[str, Callable[[], None]]]) -> None:
@@ -33,6 +35,14 @@ class ContextMenuScreen(Screen):
         self._tap     = PendingTap()
         self._dim: pygame.Surface | None = None
         self._card    = self._layout()
+        self._rise    = motion.Tween(0.22)
+
+    def on_enter(self) -> None:
+        self._rise.start()
+
+    @property
+    def animates(self) -> bool:
+        return self._rise.active()
 
     def _layout(self) -> pygame.Rect:
         h = TITLE_H + len(self._options) * ROW_H + PAD * 2
@@ -60,18 +70,20 @@ class ContextMenuScreen(Screen):
             self._dim.fill((0, 0, 0, 160))
         surface.blit(self._dim, (0, 0))
 
-        # card
-        pygame.draw.rect(surface, theme.CARD_BG, self._card, border_radius=12)
-        pygame.draw.rect(surface, (55, 55, 75), self._card, 1, border_radius=12)
+        # card (drawn lower while it rises; hit-testing uses the settled rect)
+        dy   = int(RISE_PX * (1 - motion.ease_out_cubic(self._rise.progress())))
+        card = self._card.move(0, dy)
+        pygame.draw.rect(surface, theme.CARD_BG, card, border_radius=12)
+        pygame.draw.rect(surface, (55, 55, 75), card, 1, border_radius=12)
 
         # title (track / album name)
         t_s = theme.render(self._title, 12, theme.DIM, bold=True,
                            max_width=CARD_W - PAD * 4)
-        surface.blit(t_s, t_s.get_rect(centerx=160, y=self._card.y + 14))
+        surface.blit(t_s, t_s.get_rect(centerx=160, y=card.y + 14))
 
         # option rows
         for i, (label, _cb) in enumerate(self._options):
-            r   = self._row_rect(i)
+            r   = self._row_rect(i).move(0, dy)
             sel = (i == self._sel)
             pygame.draw.rect(surface, theme.ACCENT if sel else (36, 36, 52),
                              r, border_radius=8)

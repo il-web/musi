@@ -171,6 +171,21 @@ DONE
     - DEFERRED to a follow-up: /api/v1/playlists REST CRUD in api/server.py
       (fits the library-management API remit; device UI shipped first)
 
+[x] Animations pack
+    - Screen transitions composed by the app (transition.py), screens
+      untouched: slide (default, fixed status bar), zoom (launcher apps),
+      sheet (Now Playing out of the mini bar), fade (long-press menu).
+      Pop replays the push kind backwards; go_home = one transition
+    - Screens now always draw offscreen + one blit, so a push fired from
+      inside draw (PendingTap) snapshots the last *finished* frame
+    - Now Playing: art cross-fade + accent blend + directional title slide
+      on track change, play/pause pop, tap ripples, favourite heart bump
+    - Customization -> Animations switch (pref "animations"); off = every
+      Tween is born finished (motion.py), no transitions at all
+    - STILL NEEDS an on-device check: transition smoothness over SPI and
+      the zoom's full-frame smoothscale cost on the Pi 3. If zoom drags,
+      set the launcher's scr.transition to "fade"
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

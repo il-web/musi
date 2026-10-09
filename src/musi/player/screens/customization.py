@@ -1,4 +1,4 @@
-"""Customization app — pick the home screen's wallpaper.
+"""Customization app — the home screen's wallpaper, and the Animations switch.
 
 Modelled on screens/sleep.py: a header, a row of options, tap to apply. The
 choice is written straight to prefs, and the launcher reads it on its next
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pygame
 
-from musi.player import audio_detect, minibar, prefs, statusbar, theme, wallpaper
+from musi.player import audio_detect, minibar, motion, prefs, statusbar, theme, wallpaper
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -24,6 +24,11 @@ TILE_W, TILE_H = 84, 108
 TILE_Y = 120
 GAP    = (320 - 3 * TILE_W) // 4          # 17px, evenly spread
 LABEL_Y = TILE_Y + TILE_H + 10
+
+MOTION_HINT_Y = 278
+MOTION_ROW    = pygame.Rect(10, 300, 300, 52)
+SWITCH_W, SWITCH_H = 44, 24
+SWITCH_S      = 0.18             # knob travel time
 
 
 def tile_rect(i: int) -> pygame.Rect:
@@ -63,6 +68,13 @@ class CustomizationScreen(Screen):
         self._header: pygame.Surface | None = None
         self._hint: pygame.Surface | None = None
         self._labels: list[pygame.Surface] = []
+        self._motion_hint: pygame.Surface | None = None
+        self._motion_lbl:  pygame.Surface | None = None
+        self._knob = motion.Tween(SWITCH_S)
+
+    @property
+    def animates(self) -> bool:
+        return self._knob.active()
 
     def draw(self, surface: pygame.Surface, status: PlayerStatus) -> None:
         if self._header is None:
@@ -71,6 +83,8 @@ class CustomizationScreen(Screen):
             self._hint = theme.render("Home screen wallpaper", 12, theme.DIM)
             self._labels = [theme.render(label, 12, theme.DIM)
                             for _, label in OPTIONS]
+            self._motion_hint = theme.render("Motion", 12, theme.DIM)
+            self._motion_lbl = theme.render("Animations", 16, theme.WHITE)
 
         self._tap.update()
         current = str(prefs.get("wallpaper"))
@@ -96,6 +110,17 @@ class CustomizationScreen(Screen):
             label = self._labels[i]
             surface.blit(label, label.get_rect(centerx=rect.centerx, y=LABEL_Y))
 
+        surface.blit(self._motion_hint, (14, MOTION_HINT_Y))
+        pygame.draw.rect(surface, theme.CARD_BG, MOTION_ROW, border_radius=8)
+        surface.blit(self._motion_lbl, (28, MOTION_ROW.centery
+                                        - self._motion_lbl.get_height() // 2))
+        on = motion.enabled()
+        # the knob slides toward its new side (only ever seen turning ON —
+        # turning motion off finishes every tween at once, by design)
+        k = motion.ease_out_cubic(self._knob.progress())
+        _draw_switch(surface, MOTION_ROW.right - 16 - SWITCH_W,
+                     MOTION_ROW.centery, k if on else 1 - k)
+
         minibar.draw(surface, self.app, status)
 
     def handle_touch(self, x: int, y: int) -> "Button | None":
@@ -108,9 +133,24 @@ class CustomizationScreen(Screen):
             self.app.push(NowPlayingScreen(self.app))
             return None
 
+        if MOTION_ROW.collidepoint(x, y):
+            prefs.set("animations", not motion.enabled())
+            self._knob.start()
+            return None
+
         if not self._tap.pending:
             for i, (name, _) in enumerate(OPTIONS):
                 if tile_rect(i).inflate(GAP, _hit_pad_y()).collidepoint(x, y):
                     self._tap.set(lambda n=name: prefs.set("wallpaper", n))
                     return None
         return super().handle_touch(x, y)
+
+
+def _draw_switch(surface: pygame.Surface, x: int, cy: int, pos: float) -> None:
+    """Pill switch; ``pos`` 0 = off (knob left, grey) … 1 = on (right, accent)."""
+    track = pygame.Rect(x, cy - SWITCH_H // 2, SWITCH_W, SWITCH_H)
+    col = motion.lerp_colour((60, 60, 78), theme.ACCENT, pos)
+    pygame.draw.rect(surface, col, track, border_radius=SWITCH_H // 2)
+    r = SWITCH_H // 2 - 3
+    kx = int(motion.lerp(track.x + 3 + r, track.right - 3 - r, pos))
+    pygame.draw.circle(surface, theme.WHITE, (kx, cy), r)

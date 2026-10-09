@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pygame
 
-from musi.player import art_cache, audio_detect, icons, statusbar, theme
+from musi.player import art_cache, audio_detect, icons, motion, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -32,12 +32,20 @@ VOL_Y    = 452                  # volume slider
 VOL_X    = 40
 VOL_W    = 224
 
+# Motion — all of it switches off with Customization → Animations.
+SWAP_S    = 0.35                # track change: art cross-fade + text slide
+SWAP_PX   = 28                  # how far the title/artist slide
+PP_POP_S  = 0.25                # play ⇄ pause icon pops in
+RIPPLE_S  = 0.35                # soft disc behind a tapped control
+HEART_S   = 0.32                # favourite heart bump
+
 
 class NowPlayingScreen(Screen):
     # Stay visible while listening: dim only after 15 min, screen off a
     # minute after that (other screens use the much shorter global defaults).
     dim_after = 15 * 60
     off_after = 16 * 60
+    transition = "sheet"        # rises out of the mini bar, drops back into it
 
     def __init__(self, app) -> None:
         super().__init__(app)
@@ -68,10 +76,29 @@ class NowPlayingScreen(Screen):
         self._drag_seek:  float | None = None            # 0.0–1.0 while scrubbing
         self._queue_lbl:  pygame.Surface | None = None
 
+        # motion state
+        self._swap       = motion.Tween(SWAP_S)
+        self._swap_dir   = 1                            # +1 next, -1 previous
+        self._next_dir   = 1                            # set by NEXT/PREV taps
+        self._old_art:   pygame.Surface | None = None
+        self._old_accent: tuple = theme.ACCENT
+        self._old_title: pygame.Surface | None = None
+        self._old_meta:  pygame.Surface | None = None
+        self._pp_pop     = motion.Tween(PP_POP_S)
+        self._pp_state:  str | None = None
+        self._ripple     = motion.Tween(RIPPLE_S)
+        self._ripple_at: tuple[int, int] = (0, 0)
+        self._heart      = motion.Tween(HEART_S)
+
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def on_enter(self) -> None:
         self._reload_art(self.app.status)
+
+    @property
+    def animates(self) -> bool:
+        return (self._swap.active() or self._pp_pop.active()
+                or self._ripple.active() or self._heart.active())
 
     # ── draw ─────────────────────────────────────────────────────────────────
 
@@ -84,14 +111,19 @@ class NowPlayingScreen(Screen):
         self._reload_fav(status)
         self._update_text_cache(status)
 
-        # 1 — art bleeding from the top edge, dissolving into the panel
+        swap = self._swap.progress()
+        swap_e = motion.ease_out_cubic(swap)
+        accent = (motion.lerp_colour(self._old_accent, self._accent, swap_e)
+                  if swap < 1 else self._accent)
+
+        # 1 — art bleeding from the top edge, dissolving into the panel;
+        #     on a track change the new art fades in over the old
         surface.fill(theme.BG)
-        if self._art:
-            surface.blit(self._art, (0, -10))
+        if swap < 1:
+            _draw_art(surface, self._old_art, 1.0)
+            _draw_art(surface, self._art, swap_e)
         else:
-            pygame.draw.rect(surface, theme.CARD_BG, (0, 0, 320, ART_BLEED_H))
-            lbl = theme.render("no track", 13, theme.DIM)
-            surface.blit(lbl, lbl.get_rect(center=(160, ART_BLEED_H // 2)))
+            _draw_art(surface, self._art, 1.0)
 
         fade = pygame.Surface((320, FADE_H), pygame.SRCALPHA)
         for i in range(FADE_H):
@@ -106,19 +138,27 @@ class NowPlayingScreen(Screen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_home=len(self.app.stack) > 1)
 
-        # 5 — track title + artist (shadow then text for readability)
-        if self._title_surf:
-            r = self._title_surf.get_rect(centerx=160, y=INFO_Y)
-            _shadow(surface, self._title_surf, r.x, r.y)
-            surface.blit(self._title_surf, r)
-        if self._meta_surf:
-            r = self._meta_surf.get_rect(centerx=160, y=ARTIST_Y)
-            _shadow(surface, self._meta_surf, r.x, r.y)
-            surface.blit(self._meta_surf, r)
+        # 5 — track title + artist (shadow then text for readability);
+        #     on a track change the old text slides out as the new slides in
+        #     — handed over, not cross-faded: two titles on top of each
+        #     other are unreadable, so the old one is gone before the new
+        #     one shows (out over the first 40%, in over the last 60%)
+        if swap < 1:
+            out_p = motion.ease_out_cubic(swap / 0.4)
+            in_p  = motion.ease_out_cubic((swap - 0.4) / 0.6)
+            out_dx = int(-self._swap_dir * SWAP_PX * out_p)
+            in_dx  = int(self._swap_dir * SWAP_PX * (1 - in_p))
+            _text(surface, self._old_title,  INFO_Y,   out_dx, 1 - out_p)
+            _text(surface, self._old_meta,   ARTIST_Y, out_dx, 1 - out_p)
+            _text(surface, self._title_surf, INFO_Y,   in_dx, in_p)
+            _text(surface, self._meta_surf,  ARTIST_Y, in_dx, in_p)
+        else:
+            _text(surface, self._title_surf, INFO_Y,   0, 1.0)
+            _text(surface, self._meta_surf,  ARTIST_Y, 0, 1.0)
 
         # 6 — progress bar (scrub preview while dragging)
         progress = self._drag_seek if self._drag_seek is not None else status.progress
-        _draw_bar(surface, BAR_X, BAR_Y, BAR_W, 5, progress, self._accent)
+        _draw_bar(surface, BAR_X, BAR_Y, BAR_W, 5, progress, accent)
         if self._drag_seek is not None:
             knob_x = BAR_X + int(BAR_W * self._drag_seek)
             pygame.draw.circle(surface, theme.WHITE, (knob_x, BAR_Y + 2), 7)
@@ -133,20 +173,25 @@ class NowPlayingScreen(Screen):
             _shadow(surface, self._time_surf, 16, TIME_Y)
             surface.blit(self._time_surf, (16, TIME_Y))
 
-        # 8 — transport controls
+        # 8 — transport controls (ripple behind whichever was tapped; the
+        #     play/pause glyph pops in whenever the state flips)
+        if self._ripple.active():
+            _draw_ripple(surface, self._ripple_at, self._ripple.progress(), accent)
         _draw_prev(surface, 76, CTRL_Y, theme.WHITE)
-        if status.state == "play":
-            icons.draw_pause(surface, 160, CTRL_Y, self._accent, size="lg")
-        else:
-            icons.draw_play(surface, 160, CTRL_Y, self._accent, size="lg")
+        if self._pp_state is not None and self._pp_state != status.state:
+            self._pp_pop.start()
+        self._pp_state = status.state
+        pop = motion.ease_out_back(self._pp_pop.progress())
+        _draw_play_pause(surface, status.state == "play", accent,
+                         motion.lerp(0.6, 1.0, pop))
         _draw_next(surface, 244, CTRL_Y, theme.WHITE)
 
         # 9 — favourite / shuffle / repeat / lyrics toggles + queue button
         off = (150, 150, 165)
-        icons.draw_heart(surface, 34, SEC_Y,
-                         self._accent if self._fav else off, filled=self._fav)
-        _draw_shuffle(surface, 76,  SEC_Y, self._accent if status.shuffle else off)
-        _draw_repeat(surface,  118, SEC_Y, self._accent if status.repeat  else off)
+        _draw_heart(surface, 34, SEC_Y, accent if self._fav else off, self._fav,
+                    1 + 0.45 * motion.bump(self._heart.progress()))
+        _draw_shuffle(surface, 76,  SEC_Y, accent if status.shuffle else off)
+        _draw_repeat(surface,  118, SEC_Y, accent if status.repeat  else off)
         _draw_lyrics_icon(surface, 160, SEC_Y,
                           theme.WHITE if status.path else off)
         _draw_list_icon(surface, 202, SEC_Y, theme.WHITE)
@@ -154,7 +199,7 @@ class NowPlayingScreen(Screen):
 
         # 10 — volume slider
         vol = self._drag_vol if self._drag_vol is not None else status.volume
-        _draw_volume(surface, VOL_X, VOL_W, VOL_Y, vol, self._accent)
+        _draw_volume(surface, VOL_X, VOL_W, VOL_Y, vol, accent)
 
     # ── input ─────────────────────────────────────────────────────────────────
 
@@ -171,6 +216,8 @@ class NowPlayingScreen(Screen):
                 return Button.NEXT
         # secondary row: favourite | shuffle | repeat | lyrics | queue
         if SEC_Y - 18 <= y <= SEC_Y + 18:
+            if x < 139:     # the three toggles answer with a ripple
+                self._start_ripple(34 if x < 55 else 76 if x < 97 else 118, SEC_Y)
             if x < 55:
                 self._toggle_favorite()
             elif x < 97:
@@ -238,6 +285,12 @@ class NowPlayingScreen(Screen):
             return
         self._fav = self.app.mpd.toggle_favorite(path)
         self._fav_path = path
+        if self._fav:
+            self._heart.start()
+
+    def _start_ripple(self, cx: int, cy: int) -> None:
+        self._ripple_at = (cx, cy)
+        self._ripple.start()
 
     def _open_lyrics(self) -> None:
         """Lyrics for whatever is playing right now — nothing without a track."""
@@ -249,6 +302,10 @@ class NowPlayingScreen(Screen):
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         mpd = self.app.mpd
+        if button in _TRANSPORT_X:
+            self._start_ripple(_TRANSPORT_X[button], CTRL_Y)
+        if button in (Button.NEXT, Button.PREV):
+            self._next_dir = 1 if button == Button.NEXT else -1
         if   button == Button.PLAY_PAUSE: self.app.toggle_play()
         elif button == Button.NEXT:       mpd.next_track();  self.app.request_poll()
         elif button == Button.PREV:       mpd.prev_track();  self.app.request_poll()
@@ -261,6 +318,13 @@ class NowPlayingScreen(Screen):
     def _reload_art(self, status: PlayerStatus) -> None:
         if status.path == self._cached_path:
             return
+        if self._cached_path != "UNSET":
+            # a real track change, not the first frame: animate away from
+            # what is showing now (direction from the NEXT/PREV tap, if any)
+            self._old_art, self._old_accent = self._art, self._accent
+            self._old_title, self._old_meta = self._title_surf, self._meta_surf
+            self._swap_dir, self._next_dir = self._next_dir, 1
+            self._swap.start()
         self._cached_path = status.path
         self._art         = None
         self._accent      = theme.ACCENT
@@ -300,7 +364,75 @@ class NowPlayingScreen(Screen):
             self._time_surf = theme.render(t, 11, theme.WHITE)
 
 
+_TRANSPORT_X = {Button.PREV: 76, Button.PLAY_PAUSE: 160, Button.NEXT: 244}
+
+
 # ── drawing helpers ───────────────────────────────────────────────────────────
+
+_no_art: pygame.Surface | None = None
+
+
+def _draw_art(surface: pygame.Surface, art: pygame.Surface | None, a: float) -> None:
+    """The hero art (or the "no track" panel) at opacity ``a``."""
+    global _no_art
+    if art is None:
+        if _no_art is None:
+            _no_art = pygame.Surface((320, ART_BLEED_H + 10))
+            _no_art.fill(theme.BG)
+            pygame.draw.rect(_no_art, theme.CARD_BG, (0, 10, 320, ART_BLEED_H))
+            lbl = theme.render("no track", 13, theme.DIM)
+            _no_art.blit(lbl, lbl.get_rect(center=(160, 10 + ART_BLEED_H // 2)))
+        art = _no_art
+    motion.blit_alpha(surface, art, (0, -10), a)
+
+
+def _text(surface: pygame.Surface, surf: pygame.Surface | None, y: int,
+          dx: int, a: float) -> None:
+    """Centred text line with its drop shadow, shifted ``dx`` at opacity ``a``."""
+    if surf is None or a <= 0:
+        return
+    r = surf.get_rect(centerx=160 + dx, y=y)
+    if a >= 1:
+        _shadow(surface, surf, r.x, r.y)
+        surface.blit(surf, r)
+        return
+    shadow = surf.copy()
+    shadow.fill((0, 0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    motion.blit_alpha(surface, shadow, (r.x + 2, r.y + 2), a)
+    motion.blit_alpha(surface, surf, r, a)
+
+
+def _draw_ripple(surface, at, p, colour) -> None:
+    """An expanding, fading disc behind a tapped control."""
+    e = motion.ease_out_cubic(p)
+    r = int(motion.lerp(12, 30, e))
+    disc = pygame.Surface((2 * r + 2, 2 * r + 2), pygame.SRCALPHA)
+    pygame.draw.circle(disc, (*colour[:3], int(80 * (1 - e))), (r + 1, r + 1), r)
+    surface.blit(disc, (at[0] - r - 1, at[1] - r - 1))
+
+
+def _scaled_icon(surface, cx, cy, scale, size, draw) -> None:
+    """Draw an icon at ``scale`` by rendering it into a small layer first."""
+    if abs(scale - 1.0) < 0.01:
+        draw(surface, cx, cy)
+        return
+    layer = pygame.Surface((size, size), pygame.SRCALPHA)
+    draw(layer, size // 2, size // 2)
+    n = max(2, int(size * scale))
+    layer = pygame.transform.smoothscale(layer, (n, n))
+    surface.blit(layer, (cx - n // 2, cy - n // 2))
+
+
+def _draw_play_pause(surface, playing: bool, colour, scale: float) -> None:
+    def draw(s, x, y):
+        (icons.draw_pause if playing else icons.draw_play)(s, x, y, colour, size="lg")
+    _scaled_icon(surface, 160, CTRL_Y, scale, 40, draw)
+
+
+def _draw_heart(surface, cx, cy, colour, filled: bool, scale: float) -> None:
+    _scaled_icon(surface, cx, cy, scale, 28,
+                 lambda s, x, y: icons.draw_heart(s, x, y, colour, filled=filled))
+
 
 def _shadow(surface: pygame.Surface, surf: pygame.Surface, x: int, y: int, offset: int = 2) -> None:
     """Blit a dark copy of surf offset by `offset` pixels for a drop shadow."""

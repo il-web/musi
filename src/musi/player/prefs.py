@@ -17,6 +17,8 @@ DEFAULTS: dict[str, object] = {
     # Off by default: crossfade eats the start and end of every track, which is
     # wrong for anything with a deliberate intro or outro.
     "crossfade": False,
+    # Screen transitions and Now Playing motion (Customization → Animations).
+    "animations": True,
 }
 
 _cache: dict[str, object] | None = None

@@ -26,6 +26,11 @@ class Screen(ABC):
     dim_after: "float | None" = None
     off_after: "float | None" = None
 
+    # How the app animates this screen in on push, and out again on pop: one
+    # of transition.KINDS. A caller may set it on the instance before pushing
+    # (the launcher opens apps with "zoom").
+    transition: str = "slide"
+
     def __init__(self, app: "App") -> None:
         self.app = app
 

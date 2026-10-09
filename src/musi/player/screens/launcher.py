@@ -193,20 +193,20 @@ class LauncherScreen(Screen):
     def _open(self, idx: int) -> None:
         key = self.APPS[idx][0]
         if key == "music":
-            from musi.player.screens.music import MusicHostScreen
-            self.app.push(MusicHostScreen(self.app))
+            from musi.player.screens.music import MusicHostScreen as cls
         elif key == "settings":
-            from musi.player.screens.settings import SettingsScreen
-            self.app.push(SettingsScreen(self.app))
+            from musi.player.screens.settings import SettingsScreen as cls
         elif key == "clock":
-            from musi.player.screens.clock import ClockScreen
-            self.app.push(ClockScreen(self.app))
+            from musi.player.screens.clock import ClockScreen as cls
         elif key == "sleep":
-            from musi.player.screens.sleep import SleepScreen
-            self.app.push(SleepScreen(self.app))
+            from musi.player.screens.sleep import SleepScreen as cls
         elif key == "customization":
-            from musi.player.screens.customization import CustomizationScreen
-            self.app.push(CustomizationScreen(self.app))
+            from musi.player.screens.customization import CustomizationScreen as cls
+        else:
+            return
+        scr = cls(self.app)
+        scr.transition = "zoom"         # apps grow out of their tile
+        self.app.push(scr)
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.PLAY_PAUSE:
