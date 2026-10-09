@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=10
+LATEST_STEP=11
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -308,6 +308,26 @@ user_10() {
     mkdir -p "$HOME/.config/musi" "$HOME/.config/systemd/user"
     sed "s|@HOME@|$HOME|g" "$REPO/pi/shairport-sync.conf" > "$HOME/.config/musi/shairport-sync.conf"
     install -m 0644 "$REPO/pi/musi-airplay.service" "$HOME/.config/systemd/user/musi-airplay.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    if command -v shairport-sync > /dev/null; then
+        systemctl --user restart musi-airplay 2>/dev/null || true
+    fi
+}
+
+# ── step 11: AirPlay pause/resume over Bluetooth, for real (2026-10-09) ──────
+# Step 10's bigger cushion wasn't the whole story. Testing on the device:
+# shairport-sync 4.3.7 crashed whenever it *closed* the BlueALSA output
+# (free(): invalid pointer right after "Closing") — which a pause did. Now
+# the output stays open through pauses (disable_standby_mode "auto"), the
+# hooks follow the whole session (active state) instead of each play, the
+# unit clears the AirPlay flag on every restart, and stderr is kept: step
+# 10's StandardError=null also hid the crash lines themselves.
+user_11() {
+    install -m 0755 "$REPO/pi/musi-airplay" "$HOME/.local/bin/musi-airplay"
+    sed -i 's/\r$//' "$HOME/.local/bin/musi-airplay"
+    sed "s|@HOME@|$HOME|g" "$REPO/pi/shairport-sync.conf" > "$HOME/.config/musi/shairport-sync.conf"
+    install -m 0644 "$REPO/pi/musi-airplay.service" "$HOME/.config/systemd/user/musi-airplay.service"
+    rm -f /tmp/musi-airplay
     systemctl --user daemon-reload 2>/dev/null || true
     if command -v shairport-sync > /dev/null; then
         systemctl --user restart musi-airplay 2>/dev/null || true

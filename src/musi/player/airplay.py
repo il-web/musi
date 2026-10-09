@@ -3,8 +3,9 @@
 shairport-sync (musi-airplay.service, see pi/shairport-sync.conf) does the
 audio. This module is the player's view of it:
 
-  - active(): the session hook's flag file (/tmp/musi-airplay) exists — the
-    phone is playing and MPD has been stopped to free the output.
+  - active(): the session hook's flag file (/tmp/musi-airplay) exists — a
+    phone's session owns the output (playing, or briefly paused: the session
+    outlives a pause, see pi/shairport-sync.conf) and MPD has been stopped.
   - A reader thread follows shairport-sync's metadata pipe for the title,
     artist, album, cover art and play position, and overlays them on the
     player status, so Now Playing and the mini bar show the phone's song.

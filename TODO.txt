@@ -378,6 +378,25 @@ DONE
       Israeli clients to mirror.isoc.org.il, which refused connections.
       AirPlay installed the same day: musi-airplay active, MPRIS on the bus
 
+[x] AirPlay pause/resume fix (update.sh steps 10 + 11)
+    - Bug: pause on the phone, resume -> garbled audio over the AirPods
+    - Found on the device: (1) the BlueALSA output ran dry right after a
+      resume (IO stop/start every 20-30 ms); (2) shairport-sync 4.3.7 crashes
+      (free(): invalid pointer) when it CLOSES the BlueALSA output — every
+      session end, and a pause closed it; did not crash on the wired DAC;
+      (3) a crash skips the "end" hook, leaving /tmp/musi-airplay stale
+    - Fix: 0.5 s start cushion, explicit ALSA buffer, no mmap / precision
+      timing (step 10); disable_standby_mode "auto" so pauses keep the output
+      open, hooks on the active state (spans pauses, 30 s timeout), unit
+      clears the flag on every (re)start, stderr kept (step 11)
+    - Step 11 NOT yet verified on the device (Pi went offline mid-test).
+      Still crashes at a real session END (output closes) — harmless now
+      (flag cleared, Restart=always), but worth an upstream shairport-sync
+      (5.x) build someday
+    - Test tool: pyatv from the dev PC can stream (not resume) to musi; its
+      ALAC frames trip shairport's decoder ("unhandled prediction type"),
+      so only use it for crash/underrun checks, not audio quality
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

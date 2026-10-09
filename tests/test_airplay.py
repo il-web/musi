@@ -172,3 +172,28 @@ def test_airplay_is_never_scrobbled():
         s.update(st, now=i, wall=i)
     s.update(PlayerStatus.disconnected(), now=401, wall=401)
     assert listened == []
+
+
+# ── device config (pi/) — the pause/resume fix must not drift ────────────────
+
+from pathlib import Path  # noqa: E402
+
+PI = Path(__file__).resolve().parent.parent / "pi"
+
+
+def test_a_pause_keeps_the_output_open_and_the_session_alive():
+    """Closing the BlueALSA output crashed shairport-sync 4.3.7, and reopening
+    it on resume starved — so a pause must do neither (2026-10-09)."""
+    conf = (PI / "shairport-sync.conf").read_text(encoding="utf-8")
+    assert 'disable_standby_mode = "auto"' in conf
+    assert "run_this_before_entering_active_state" in conf
+    assert "run_this_after_exiting_active_state" in conf
+    assert "run_this_before_play_begins" not in conf      # per-play hooks are gone
+    assert 'use_mmap_if_available = "no"' in conf
+
+
+def test_a_crashed_receiver_never_leaves_musi_stuck_on_airplay():
+    unit = (PI / "musi-airplay.service").read_text(encoding="utf-8")
+    assert "ExecStartPre=-/bin/rm -f /tmp/musi-airplay" in unit
+    assert "ExecStopPost=-/bin/rm -f /tmp/musi-airplay" in unit
+    assert "StandardError=null" not in unit               # keep the crash lines
