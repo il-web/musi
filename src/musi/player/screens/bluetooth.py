@@ -90,6 +90,11 @@ class BluetoothScreen(ListScreen):
             msg = theme.render(self._info_msg, 12, theme.DIM, max_width=290)
             surface.blit(msg, (14, LIST_Y))
         else:
+            # _fetch fills _devices on a worker thread; the scroll model learns
+            # the new length here, on the UI thread. Without this it stayed at
+            # 0 rows, so a long device list could never be scrolled.
+            if self._klist.count != len(self._devices):
+                self._klist.set_count(len(self._devices))
             self.draw_list_viewport(surface, len(self._devices))
 
         # action message (bottom, above nav)
