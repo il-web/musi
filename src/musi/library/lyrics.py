@@ -3,7 +3,11 @@
 LRCLIB is keyless and returns LRC-format synced lyrics plus a plain-text
 fallback — and, newer, a "Lyricsfile" (YAML, https://lrclib.net/lyricsfile)
 with each line's start/end and, where someone has timed them, every word's.
-Word timing is used when present; otherwise lines are timed from the LRC. Nothing here runs on its own: the Now Playing lyrics button asks for
+Word timing is used when present; otherwise lines are timed from the LRC.
+
+NetEase (library/netease.py, unofficial) is the second source: asked only
+when LRCLIB has no word timing, it adds word timing where it has a confident
+match — or line-timed lyrics when LRCLIB has none at all. Nothing here runs on its own: the Now Playing lyrics button asks for
 the current track only, and the answer is cached forever, so a song costs one
 request in its lifetime.
 
@@ -60,11 +64,13 @@ class Lyrics:
     error: str = ""
     timed: list[Line] = field(default_factory=list)   # lines with end + words
     word_synced: bool = False
+    source: str = "LRCLIB"                             # whose timing is shown
 
 
-# Cache payload format. v2 added the Lyricsfile; an older entry is re-fetched
-# once (served from the old cache if that fetch fails).
-CACHE_VERSION = 2
+# Cache payload format. v2 added the Lyricsfile, v3 the NetEase answer; an
+# older entry is re-fetched once (served from the old cache if that fails).
+CACHE_VERSION = 3
+BREAK_S = 6.0           # a silence this long becomes a "• • •" line
 
 
 # A synced lyric file is a few KB. Cap the read so a hostile or broken endpoint
@@ -151,6 +157,26 @@ def timed_from_lrc(lines: list[tuple[float, str]]) -> list[Line]:
     return out
 
 
+def timed_from_yrc(text: str) -> list[Line]:
+    from musi.library import netease
+    return [Line(start, end, "".join(w[2] for w in words).strip(),
+                 [Word(ws, we, wt) for ws, we, wt in words])
+            for start, end, words in netease.parse_yrc(text)]
+
+
+def with_breaks(timed: list[Line]) -> list[Line]:
+    """Insert a break line ("♪") into long silences — before the first line
+    and between lines — so the screen can show its dots there, as Apple does."""
+    out: list[Line] = []
+    prev_end = 0.0
+    for line in timed:
+        if line.start - prev_end >= BREAK_S and line.text.strip() != "♪":
+            out.append(Line(prev_end, line.start, "♪"))
+        out.append(line)
+        prev_end = max(prev_end, line.end)
+    return out
+
+
 def active_index(lines: list[tuple[float, str]], elapsed: float) -> int:
     """Index of the line playing at `elapsed`, or -1 before the first."""
     if not lines:
@@ -167,22 +193,62 @@ def cache_path(lyrics_dir: Path, artist: str, title: str) -> Path:
 
 
 def _from_payload(payload: dict) -> Lyrics:
-    synced = parse_lrc(payload.get("synced") or "")
-    plain  = payload.get("plain") or ""
-    timed  = parse_lyricsfile(payload.get("lyricsfile") or "")
-    if timed:
-        synced = [(l.start, l.text) for l in timed]
+    """Pick the best timing on offer, in this order: LRCLIB words, NetEase
+    words, LRCLIB lines (Lyricsfile, then LRC), NetEase lines."""
+    plain = payload.get("plain") or ""
+    ne    = payload.get("netease") or {}
+    lf    = parse_lyricsfile(payload.get("lyricsfile") or "")
+    lrc   = timed_from_lrc(parse_lrc(payload.get("synced") or ""))
+    yrc   = timed_from_yrc(ne.get("yrc") or "")
+    source = "LRCLIB"
+    if any(l.words for l in lf):
+        timed = lf
+    elif yrc:
+        timed, source = yrc, "NetEase"
+    elif lf or lrc:
+        timed = lf or lrc
     else:
-        timed = timed_from_lrc(synced)
+        timed = timed_from_lrc(parse_lrc(ne.get("lrc") or ""))
+        source = "NetEase" if timed else "LRCLIB"
+    if any(l.words for l in timed):
+        timed = with_breaks(timed)          # exact ends: silences are real
+    lines = [(l.start, l.text) for l in timed]
     return Lyrics(
-        lines        = synced,
+        lines        = lines,
         plain        = plain,
-        synced       = bool(synced),
-        found        = bool(synced or plain),
-        instrumental = bool(payload.get("instrumental")),
+        synced       = bool(lines),
+        found        = bool(lines or plain),
+        instrumental = bool(payload.get("instrumental")) and not lines,
         timed        = timed,
         word_synced  = any(l.words for l in timed),
+        source       = source,
     )
+
+
+def _wants_netease(payload: dict) -> bool:
+    """Worth asking NetEase: LRCLIB has no word timing, the song isn't an
+    instrumental, and NetEase hasn't answered for it yet."""
+    if (payload.get("netease") or {}).get("checked"):
+        return False
+    if payload.get("instrumental"):
+        return False
+    return not any(l.words for l in parse_lyricsfile(payload.get("lyricsfile") or ""))
+
+
+def _ask_netease(payload: dict, artist: str, title: str, duration: float, get) -> None:
+    """Add NetEase's answer to ``payload`` in place. A transport failure
+    leaves it unchecked, so the next open tries again; 'no match' is final."""
+    from musi.library import netease
+    try:
+        found = netease.fetch(title, artist, duration, get=get)
+    except Exception:
+        logging.info("lyrics: NetEase unreachable for %s / %s", artist, title,
+                     exc_info=True)
+        payload["netease"] = {"checked": False}
+        return
+    payload["netease"] = {"checked": True,
+                          "yrc": (found or {}).get("yrc", ""),
+                          "lrc": (found or {}).get("lrc", "")}
 
 
 # ── fetch ─────────────────────────────────────────────────────────────────────
@@ -190,6 +256,7 @@ def _from_payload(payload: dict) -> Lyrics:
 def get_lyrics(lyrics_dir: Path, artist: str, title: str, album: str,
                duration: float, *,
                get: Callable[..., bytes | None] = _http_get,
+               netease_get: Callable[..., bytes] | None = None,
                force: bool = False) -> Lyrics:
     """Cached lyrics for one track, fetching from LRCLIB on a miss.
 
@@ -197,6 +264,11 @@ def get_lyrics(lyrics_dir: Path, artist: str, title: str, album: str,
     """
     if not artist or not title:
         return Lyrics(error="Track has no artist or title")
+    if netease_get is None and get is _http_get:
+        # the real LRCLIB getter brings the real NetEase one; a test that
+        # injects only an LRCLIB fake leaves NetEase out entirely
+        from musi.library import netease
+        netease_get = netease._get
 
     path = cache_path(lyrics_dir, artist, title)
     stale: dict | None = None
@@ -204,6 +276,10 @@ def get_lyrics(lyrics_dir: Path, artist: str, title: str, album: str,
         try:
             cached = json.loads(path.read_text(encoding="utf-8"))
             if cached.get("v") == CACHE_VERSION:
+                if netease_get and _wants_netease(cached):   # NetEase was down
+                    _ask_netease(cached, artist, title, duration, netease_get)
+                    if cached["netease"].get("checked"):
+                        _write_cache(lyrics_dir, path, cached)
                 return _from_payload(cached)
             stale = cached          # pre-Lyricsfile entry: refetch once
         except Exception:
@@ -243,10 +319,15 @@ def get_lyrics(lyrics_dir: Path, artist: str, title: str, album: str,
                          artist, title, exc_info=True)
             return Lyrics(error="bad response")
 
+    if netease_get and _wants_netease(payload):
+        _ask_netease(payload, artist, title, duration, netease_get)
+    _write_cache(lyrics_dir, path, payload)
+    return _from_payload(payload)
+
+
+def _write_cache(lyrics_dir: Path, path: Path, payload: dict) -> None:
     try:
         Path(lyrics_dir).mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
     except OSError:
         logging.info("lyrics: could not write cache %s", path, exc_info=True)
-
-    return _from_payload(payload)

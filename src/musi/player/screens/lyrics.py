@@ -76,11 +76,13 @@ class _Laid:
             # place each word; wrap when the next one would overflow
             x = y = 0
             rows: list[list[str]] = [[]]
-            for w in line.words:
+            breakable = False           # only wrap where the text has a space:
+            for w in line.words:        # NetEase splits "don’t" into 3 tokens
                 ww = f.size(w.text)[0]
-                if x and x + f.size(w.text.rstrip())[0] > _MAX_W:
+                if breakable and x + f.size(w.text.rstrip())[0] > _MAX_W:
                     x, y = 0, y + row_h + ROW_GAP
                     rows.append([])
+                breakable = w.text[-1:].isspace()
                 dim = theme.render(w.text, LINE_SIZE, DIM, bold=True)
                 bright = theme.render(w.text, LINE_SIZE, BRIGHT, bold=True)
                 self.words.append((x, y, dim, bright, w))
