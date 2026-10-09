@@ -40,6 +40,7 @@ _SLOP = 12         # matches app.TAP_SLOP_PX — movement below this is a tap
 class LauncherScreen(Screen):
 
     APPS: list[tuple[str, str]] = [
+        ("home",     "Home"),          # big clock + Continue listening (home_page.py)
         ("music",    "Music"),
         ("radio",    "Radio"),
         ("settings", "Settings"),
@@ -61,6 +62,10 @@ class LauncherScreen(Screen):
         self._last_x  = 0
         self._moved   = 0.0
         self._albums: int | None = None   # counted once, not once per frame
+        # Home page data — SQL only on enter and when the song changes
+        self._home_item: dict | None = None
+        self._home_info: str = ""
+        self._home_path: object = "UNSET"
         self._scrim_surf: pygame.Surface | None = None
 
     @property
@@ -70,10 +75,42 @@ class LauncherScreen(Screen):
     def on_enter(self) -> None:
         """Recount the library — it may have grown while we were in an app."""
         self._albums = None
+        self._home_path = "UNSET"           # refresh the Home page's card too
+
+    def _home_refresh(self) -> None:
+        from musi.player.screens import home_page
+        status = getattr(self.app, "status", None)
+        path = getattr(status, "path", None)
+        if path == self._home_path:
+            return
+        self._home_path = path
+        try:
+            self._home_item = home_page.continue_item(self.app.db)
+            self._home_info = home_page.info_line(self.app.db)
+        except Exception:
+            self._home_item, self._home_info = None, ""
+
+    def _home_extra(self) -> str:
+        # from the status, not the flag file: this runs every frame
+        from musi.library import remote
+        if remote.kind(getattr(getattr(self.app, "status", None), "path", None)) == "airplay":
+            return "Playing from your phone over AirPlay"
+        from musi.player.screens.sleep import format_remaining
+        left = self.app.sleep_remaining()
+        return f"Sleep timer: {format_remaining(left)}" if left else ""
 
     # ── subtitles ─────────────────────────────────────────────────────────────
 
     def subtitle(self, key: str) -> str:
+        if key == "home":
+            # not shown as text: it is the page's cache key (home_page.signature)
+            from datetime import datetime
+
+            from musi.player.screens import home_page
+            self._home_refresh()
+            return home_page.signature(datetime.now(), self._home_item,
+                                       getattr(self.app, "status", None),
+                                       self._home_info, self._home_extra())
         if key == "music":
             if self._albums is None:
                 self._albums = self.app.db.execute(
@@ -142,23 +179,32 @@ class LauncherScreen(Screen):
         # y=26 separator line is no longer erased, since nothing here paints
         # over it. With a wallpaper set, the wallpaper blit covers row 26, so
         # that separator shows on "none" and is hidden on "warm"/"cool".
-        page = pygame.Surface((320, PAGE_H), pygame.SRCALPHA)
+        if key == "home":
+            from datetime import datetime
 
-        # blit.onto, not page.blit: the page has per-pixel alpha, and an
-        # odd x on such a destination SIGBUSes the Pi (see blit.py).
-        tile = app_tiles.render_tile(key)
-        blit.onto(page, tile, tile.get_rect(centerx=160, y=TILE_Y))
+            from musi.player.screens import home_page
+            page = home_page.render(datetime.now(), self._home_item,
+                                    getattr(self.app, "status", None),
+                                    self._home_info, self._home_extra(), (320, PAGE_H))
+        else:
+            page = pygame.Surface((320, PAGE_H), pygame.SRCALPHA)
 
-        name = theme.render(label, 18, theme.WHITE, bold=True)
-        blit.onto(page, name, name.get_rect(centerx=160, y=LABEL_Y))
+            # blit.onto, not page.blit: the page has per-pixel alpha, and an
+            # odd x on such a destination SIGBUSes the Pi (see blit.py).
+            tile = app_tiles.render_tile(key)
+            blit.onto(page, tile, tile.get_rect(centerx=160, y=TILE_Y))
 
-        if sub:
-            sub_s = theme.render(sub, 11, theme.DIM)
-            blit.onto(page, sub_s, sub_s.get_rect(centerx=160, y=SUB_Y))
+            name = theme.render(label, 18, theme.WHITE, bold=True)
+            blit.onto(page, name, name.get_rect(centerx=160, y=LABEL_Y))
+
+            if sub:
+                sub_s = theme.render(sub, 11, theme.DIM)
+                blit.onto(page, sub_s, sub_s.get_rect(centerx=160, y=SUB_Y))
 
         for i in range(len(self.APPS)):
             cx = 160 + (i - (len(self.APPS) - 1) / 2) * 14
-            col = app_tiles.accent(key) if i == idx else (58, 58, 74)
+            accent = theme.WHITE if key == "home" else app_tiles.accent(key)
+            col = accent if i == idx else (58, 58, 74)
             pygame.draw.circle(page, col, (int(cx), DOTS_Y), 3)
 
         self._pages[idx] = page
@@ -192,10 +238,21 @@ class LauncherScreen(Screen):
             from musi.player.screens.now_playing import NowPlayingScreen
             self.app.push(NowPlayingScreen(self.app))
         elif PAGE_Y <= y < PAGE_BOTTOM:
-            self._open(self._car.index)
+            if self.APPS[self._car.index][0] == "home":
+                from musi.player.screens import home_page
+                zone = home_page.hit(x, y - PAGE_Y)
+                if zone:
+                    home_page.resume(self.app, self._home_item,
+                                     open_player=(zone == "card"))
+            else:
+                self._open(self._car.index)
 
     def _open(self, idx: int) -> None:
         key = self.APPS[idx][0]
+        if key == "home":
+            from musi.player.screens import home_page
+            home_page.resume(self.app, self._home_item, open_player=True)
+            return
         if key == "music":
             from musi.player.screens.music import MusicHostScreen as cls
         elif key == "radio":

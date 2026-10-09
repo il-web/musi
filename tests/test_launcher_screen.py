@@ -75,11 +75,12 @@ def _launcher(app):
 def test_apps_in_order(app):
     s = _launcher(app)
     assert [k for k, _ in s.APPS] == [
-        "music", "radio", "settings", "clock", "sleep", "customization"]
+        "home", "music", "radio", "settings", "clock", "sleep", "customization"]
 
 
 def test_tap_on_the_tile_opens_the_app(app):
     s = _launcher(app)
+    s._car.index = 1                               # Music (Home is page 0)
     s.on_press(160, 160)
     s.on_release(160, 160)
     assert app.stack[-1].__class__.__name__ == "MusicHostScreen"
@@ -95,12 +96,13 @@ def test_swipe_does_not_open_an_app(app):
 
 def test_swipe_left_advances_to_radio(app):
     s = _launcher(app)
+    s._car.index = 1                               # from Music
     s.on_press(240, 160)
     s.on_drag(60, 160)
     s.on_release(60, 160)
     while s._car.update():
         pass
-    assert s._car.index == 1
+    assert s._car.index == 2
     s.on_press(160, 160)
     s.on_release(160, 160)
     assert app.stack[-1].__class__.__name__ == "RadioScreen"
@@ -113,7 +115,7 @@ def test_swipe_right_wraps_to_customization(app):
     s.on_release(240, 160)
     while s._car.update():
         pass
-    assert s._car.index == 5
+    assert s._car.index == 6
     s.on_press(160, 160)
     s.on_release(160, 160)
     assert app.stack[-1].__class__.__name__ == "CustomizationScreen"
@@ -121,7 +123,7 @@ def test_swipe_right_wraps_to_customization(app):
 
 def test_clock_page_opens_clock(app):
     s = _launcher(app)
-    s._car.index = 3
+    s._car.index = 4
     s.on_press(160, 160)
     s.on_release(160, 160)
     assert app.stack[-1].__class__.__name__ == "ClockScreen"
@@ -183,5 +185,47 @@ def test_music_tile_opens_the_new_host(app):
     from musi.player.screens.music import MusicHostScreen
     s = LauncherScreen(app)
     app.stack.append(s)
-    s._open(0)
+    s._open(1)
     assert isinstance(app.stack[-1], MusicHostScreen)
+
+
+# ── the Home page (page 0) ────────────────────────────────────────────────────
+
+def _played(app, title="Song 1"):
+    album, artist = app.db.execute("SELECT id, artist_id FROM albums LIMIT 1").fetchone()
+    for n in range(3):
+        app.db.execute("INSERT OR IGNORE INTO tracks (album_id, artist_id, path, title, track_number)"
+                       " VALUES (?, ?, ?, ?, ?)", (album, artist, f"/m/{n}.mp3", f"Song {n}", n))
+    row = app.db.execute("SELECT id FROM tracks WHERE title = ?", (title,)).fetchone()
+    app.db.execute("INSERT INTO play_history (track_id) VALUES (?)", (row[0],))
+    app.db.commit()
+
+
+def test_home_is_the_first_page_and_shows_continue_listening(app):
+    from musi.player.screens import home_page
+    _played(app)
+    s = _launcher(app)
+    assert s._car.index == 0 and s.APPS[0][0] == "home"
+    s.draw(pygame.Surface((320, 480)), FakeStatus())
+    assert s._home_item and s._home_item["title"] == "Song 1"
+
+
+def test_home_card_tap_plays_that_song_and_opens_the_player(app):
+    from musi.player.screens import home_page
+    _played(app)
+    played = []
+    app.mpd.play_paths = lambda paths, start_index=0: played.append((paths, start_index))
+    s = _launcher(app)
+    s.draw(pygame.Surface((320, 480)), FakeStatus())
+    x, y = home_page.CARD.x + 120, home_page.CARD.centery + 26     # page → screen y
+    s.on_press(x, y)
+    s.on_release(x, y)
+    assert played and played[0][0][played[0][1]].endswith("1.mp3")
+    assert app.stack[-1].__class__.__name__ == "NowPlayingScreen"
+
+
+def test_home_page_redraws_only_when_something_changes(app):
+    s = _launcher(app)
+    st = FakeStatus()
+    first = s.subtitle("home")
+    assert s.subtitle("home") == first             # same minute, same song: cached
