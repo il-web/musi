@@ -225,7 +225,7 @@ class SearchScreen(ListScreen):
         )
 
         # title
-        cloud = remote.is_remote(res.path)
+        cloud = remote.is_server(res.path)
         title_s = theme.render(res.title, 13, theme.WHITE, bold=sel,
                                max_width=278 - (icons.CLOUD_W if cloud else 0))
         r = surface.blit(title_s, (16, y + 8))

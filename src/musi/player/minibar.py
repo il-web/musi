@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import pygame
 
-from musi.library import remote
+import json
+import time
+
+from musi.library import radio, remote
 from musi.player import art_cache, icons, theme
 
 BAR_H: int = 44
@@ -26,6 +29,7 @@ _title_surf:  pygame.Surface | None = None
 _meta_surf:   pygame.Surface | None = None
 _prev_title:  tuple = ("", False)   # (title, streamed?)
 _prev_meta:   str = ""
+_logo_retry:  float = 0.0     # radio: when to look for the logo again
 
 
 def draw(surface: pygame.Surface, app, status, y: int = BAR_Y) -> None:
@@ -69,11 +73,17 @@ def hit(x: int, y: int, bar_y: int = BAR_Y) -> "str | None":
 # ── internals ─────────────────────────────────────────────────────────────────
 
 def _reload_art(app, status) -> None:
-    global _art, _accent, _cached_path
+    global _art, _accent, _cached_path, _logo_retry
     if status.path == _cached_path:
+        if _logo_retry and time.monotonic() >= _logo_retry:
+            _radio_art(status.path)             # the logo may have landed
         return
     _cached_path = status.path
     _art, _accent = None, theme.ACCENT
+    _logo_retry = 0.0
+    if remote.is_radio(status.path):
+        _radio_art(status.path)
+        return
     if not status.path or app.db is None:
         return
     res = art_cache.get_track_art_and_palette(
@@ -82,18 +92,37 @@ def _reload_art(app, status) -> None:
     _accent = art_cache.parse_palette(res["palette"], do_brighten=True)
 
 
+def _radio_art(path: str) -> None:
+    """Station logo, once downloaded — checked at most once a second until
+    then, so the render loop isn't stat()ing a file every frame."""
+    global _art, _accent, _logo_retry
+    st = radio.station_for(path)
+    logo = radio.ensure_logo(st) if st else None
+    if logo:
+        _art = art_cache.load_surface(str(logo), (32, 32))
+        palette = radio.logo_palette(st)
+        if palette:
+            _accent = art_cache.parse_palette(json.dumps(palette), do_brighten=True)
+        _logo_retry = 0.0
+    else:
+        _logo_retry = time.monotonic() + 1.0 if st and st.get("image") else 0.0
+
+
 def _update_text(status) -> None:
     global _title_surf, _meta_surf, _prev_title, _prev_meta
     title = status.title or "Nothing playing"
     meta  = status.artist or ""
-    cloud = remote.is_remote(status.path)
-    key   = (title, cloud)
+    kind  = remote.kind(status.path)
+    key   = (title, kind)
     if key != _prev_title:
         _prev_title = key
+        tagged = kind in ("server", "radio")
         _title_surf = theme.render(title, 12, theme.WHITE, bold=True,
-                                   max_width=224 - (icons.CLOUD_W if cloud else 0))
-        if cloud:
+                                   max_width=224 - (icons.CLOUD_W if tagged else 0))
+        if kind == "server":
             _title_surf = icons.with_cloud(_title_surf, theme.DIM)
+        elif kind == "radio":
+            _title_surf = icons.with_radio(_title_surf, theme.DIM)
     if meta != _prev_meta:
         _prev_meta = meta
         _meta_surf = theme.render(meta, 10, theme.DIM, max_width=224)

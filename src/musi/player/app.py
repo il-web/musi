@@ -529,6 +529,13 @@ class App:
         Memoised: the poll asks every second, and the render loop must not
         hit the database per frame (see tests/test_draw_loop_cost.py).
         """
+        from musi.library import radio, remote
+        if remote.is_radio(url):
+            # MPD knows the stream URL and maybe an ICY "now playing" title —
+            # the station's name comes from what radio_play noted at tune-in
+            st = radio.station_for(url)
+            return ({"title": st["name"], "artist": st["name"], "album": "Live radio"}
+                    if st else None)
         if self._remote_meta.get(url) is None:   # misses retry: a sync may add it
             row = None
             if self._db is not None:

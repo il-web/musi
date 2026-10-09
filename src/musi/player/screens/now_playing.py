@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pygame
 
-from musi.library import remote
-from musi.player import art_cache, audio_detect, icons, motion, statusbar, theme
+import json
+import time
+
+from musi.library import radio, remote
+from musi.player import art_cache, audio_detect, icons, motion, radio_play, statusbar, theme
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -91,6 +94,12 @@ class NowPlayingScreen(Screen):
         self._ripple_at: tuple[int, int] = (0, 0)
         self._heart      = motion.Tween(HEART_S)
 
+        # internet radio: the station on air, and whether its logo is still
+        # downloading (the hero is rebuilt once it lands)
+        self._station:   dict | None = None
+        self._logo_wait: float = 0.0
+        self._radio_msg: str = ""
+
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def on_enter(self) -> None:
@@ -109,8 +118,11 @@ class NowPlayingScreen(Screen):
             self._queue_lbl = theme.render("Queue", 10, theme.WHITE)
 
         self._reload_art(status)
+        if self._logo_wait and time.monotonic() >= self._logo_wait:
+            self._load_radio_art()              # did the logo land yet?
         self._reload_fav(status)
         self._update_text_cache(status)
+        live = remote.is_radio(status.path)
 
         swap = self._swap.progress()
         swap_e = motion.ease_out_cubic(swap)
@@ -157,9 +169,14 @@ class NowPlayingScreen(Screen):
             _text(surface, self._title_surf, INFO_Y,   0, 1.0)
             _text(surface, self._meta_surf,  ARTIST_Y, 0, 1.0)
 
+        # 6/7 — radio is live: no bar, no times, nothing to seek
+        if live:
+            _draw_live(surface, accent, self._radio_msg)
+
         # 6 — progress bar (scrub preview while dragging)
         progress = self._drag_seek if self._drag_seek is not None else status.progress
-        _draw_bar(surface, BAR_X, BAR_Y, BAR_W, 5, progress, accent)
+        if not live:
+            _draw_bar(surface, BAR_X, BAR_Y, BAR_W, 5, progress, accent)
         if self._drag_seek is not None:
             knob_x = BAR_X + int(BAR_W * self._drag_seek)
             pygame.draw.circle(surface, theme.WHITE, (knob_x, BAR_Y + 2), 7)
@@ -170,7 +187,7 @@ class NowPlayingScreen(Screen):
             ts = theme.render(t, 11, theme.WHITE)
             _shadow(surface, ts, 16, TIME_Y)
             surface.blit(ts, (16, TIME_Y))
-        elif self._time_surf:
+        elif self._time_surf and not live:
             _shadow(surface, self._time_surf, 16, TIME_Y)
             surface.blit(self._time_surf, (16, TIME_Y))
 
@@ -194,7 +211,7 @@ class NowPlayingScreen(Screen):
         _draw_shuffle(surface, 76,  SEC_Y, accent if status.shuffle else off)
         _draw_repeat(surface,  118, SEC_Y, accent if status.repeat  else off)
         _draw_lyrics_icon(surface, 160, SEC_Y,
-                          theme.WHITE if status.path else off)
+                          theme.WHITE if status.path and not live else off)
         _draw_list_icon(surface, 202, SEC_Y, theme.WHITE)
         surface.blit(self._queue_lbl, self._queue_lbl.get_rect(midleft=(214, SEC_Y)))
 
@@ -284,10 +301,21 @@ class NowPlayingScreen(Screen):
         path = self.app.status.path
         if not path:
             return
+        if remote.is_radio(path):
+            st = radio.station_for(path)
+            if st:
+                self._fav = radio.toggle_saved(st)
+                self._fav_path = path
+                if self._fav:
+                    self._heart.start()
+            return
         self._fav = self.app.mpd.toggle_favorite(path)
         self._fav_path = path
         if self._fav:
             self._heart.start()
+
+    def _tuned(self, error: str | None) -> None:
+        self._radio_msg = f"Couldn't tune in: {error}" if error else ""
 
     def _start_ripple(self, cx: int, cy: int) -> None:
         self._ripple_at = (cx, cy)
@@ -296,7 +324,7 @@ class NowPlayingScreen(Screen):
     def _open_lyrics(self) -> None:
         """Lyrics for whatever is playing right now — nothing without a track."""
         status = self.app.status
-        if not status.path:
+        if not status.path or remote.is_radio(status.path):
             return
         from musi.player.screens.lyrics import LyricsScreen
         self.app.push(LyricsScreen(self.app, status))
@@ -307,6 +335,13 @@ class NowPlayingScreen(Screen):
             self._start_ripple(_TRANSPORT_X[button], CTRL_Y)
         if button in (Button.NEXT, Button.PREV):
             self._next_dir = 1 if button == Button.NEXT else -1
+        if button in (Button.NEXT, Button.PREV) and remote.is_radio(status.path):
+            # radio has no track list: skip through the saved stations instead
+            self._radio_msg = "Tuning in…"
+            if not radio_play.step(self.app, 1 if button == Button.NEXT else -1,
+                                   on_done=self._tuned):
+                self._radio_msg = "Save more stations to switch between them"
+            return
         if   button == Button.PLAY_PAUSE: self.app.toggle_play()
         elif button == Button.NEXT:       mpd.next_track();  self.app.request_poll()
         elif button == Button.PREV:       mpd.prev_track();  self.app.request_poll()
@@ -329,7 +364,14 @@ class NowPlayingScreen(Screen):
         self._cached_path = status.path
         self._art         = None
         self._accent      = theme.ACCENT
+        self._station     = None
+        self._radio_msg   = ""
+        self._logo_wait   = 0.0
 
+        if remote.is_radio(status.path):
+            self._station = radio.station_for(status.path)
+            self._load_radio_art()
+            return
         if not status.path or self.app.db is None:
             return
 
@@ -337,28 +379,49 @@ class NowPlayingScreen(Screen):
         self._art = art_cache.load_surface(res["art_path"], (320, 320))
         self._accent = art_cache.parse_palette(res["palette"])
 
+    def _load_radio_art(self) -> None:
+        """Station logo on a backdrop in the logo's own colour. While the logo
+        downloads, a plain backdrop shows and draw() asks again each second."""
+        st = self._station
+        if st is None:
+            return
+        path = radio.ensure_logo(st)
+        palette = radio.logo_palette(st)
+        self._accent = art_cache.parse_palette(json.dumps(palette), do_brighten=True) \
+            if palette else theme.ACCENT
+        self._art = _radio_hero(st, path, self._accent)
+        pending = not path and bool(st.get("image"))
+        self._logo_wait = time.monotonic() + 1.0 if pending else 0.0
+
     def _reload_fav(self, status: PlayerStatus) -> None:
         """Refresh the heart state when the track changes (one MPD call)."""
         if status.path == self._fav_path:
             return
         self._fav_path = status.path
+        if remote.is_radio(status.path):            # heart = saved station
+            st = radio.station_for(status.path)
+            self._fav = bool(st) and radio.is_saved(st)
+            return
         self._fav = self.app.mpd.is_favorite(status.path) if status.path else False
 
     def _update_text_cache(self, status: PlayerStatus) -> None:
         """Re-render text surfaces only when content changes."""
         title = status.title or "musi"
         meta  = f"{status.artist}" + (f"  ·  {status.album}" if status.album else "")
-        cloud = remote.is_remote(status.path)
-        key   = (title, cloud)     # same title, other source
+        kind  = remote.kind(status.path)
+        key   = (title, kind)      # same title, other source
+        tagged = kind in ("server", "radio")
 
         if key != self._prev_title:
             self._prev_title  = key
             self._title_surf  = theme.render(
                 title, 18, theme.WHITE, bold=True,
-                max_width=296 - (icons.CLOUD_W if cloud else 0))
-            if cloud:
-                # baked in, so the shadow and the track-change slide carry it
+                max_width=296 - (icons.CLOUD_W if tagged else 0))
+            # baked in, so the shadow and the track-change slide carry it
+            if kind == "server":
                 self._title_surf = icons.with_cloud(self._title_surf, theme.WHITE)
+            elif kind == "radio":
+                self._title_surf = icons.with_radio(self._title_surf, theme.WHITE)
 
         if meta != self._prev_meta:
             self._prev_meta  = meta
@@ -373,6 +436,51 @@ class NowPlayingScreen(Screen):
 
 
 _TRANSPORT_X = {Button.PREV: 76, Button.PLAY_PAUSE: 160, Button.NEXT: 244}
+
+LOGO = 168                      # station logo size on the radio hero
+_heroes: dict[tuple, pygame.Surface] = {}
+
+
+def _radio_hero(station: dict, logo_path, accent: tuple) -> pygame.Surface:
+    """Hero art for a station: its logo centred on a backdrop of its colour.
+
+    Everything here is opaque — the logo is flattened onto the backdrop
+    colour before it is scaled — so no per-pixel-alpha scaling or odd-column
+    alpha blits reach the Pi (see the crash notes above _draw_ripple).
+    """
+    key = (station.get("provider"), station.get("id"), str(logo_path), accent)
+    hit = _heroes.get(key)
+    if hit is not None:
+        return hit
+    bg = theme.darken(accent, 0.35)
+    hero = pygame.Surface((320, ART_BLEED_H + 10))
+    hero.fill(bg)
+    if logo_path:
+        try:
+            img = pygame.image.load(str(logo_path))
+            flat = pygame.Surface(img.get_size())
+            flat.fill(bg)
+            flat.blit(img, (0, 0))
+            flat = pygame.transform.smoothscale(flat.convert(), (LOGO, LOGO))
+            hero.blit(flat, ((320 - LOGO) // 2, 10 + (ART_BLEED_H - LOGO) // 2 - 12))
+        except (pygame.error, OSError):
+            pass
+    else:
+        icons.draw_radio(hero, 160, 10 + ART_BLEED_H // 2 - 12, theme.WHITE)
+    if len(_heroes) > 20:
+        _heroes.clear()
+    _heroes[key] = hero
+    return hero
+
+
+def _draw_live(surface: pygame.Surface, accent: tuple, msg: str) -> None:
+    """'● LIVE' where the progress bar would be (and any tuning message)."""
+    pygame.draw.circle(surface, (235, 70, 70), (BAR_X + 5, BAR_Y + 3), 4)
+    lbl = theme.render("LIVE", 11, theme.WHITE, bold=True)
+    surface.blit(lbl, (BAR_X + 14, BAR_Y - 4))
+    if msg:
+        m = theme.render(msg, 11, theme.DIM, max_width=230)
+        surface.blit(m, (BAR_X + 56, BAR_Y - 4))
 
 
 # ── drawing helpers ───────────────────────────────────────────────────────────

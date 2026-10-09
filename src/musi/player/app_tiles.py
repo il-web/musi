@@ -12,11 +12,12 @@ import pygame
 
 TILE: int = 118
 
-KEYS: tuple[str, ...] = ("music", "settings", "clock", "sleep", "customization")
+KEYS: tuple[str, ...] = ("music", "radio", "settings", "clock", "sleep", "customization")
 
 # (top-left colour, bottom-right colour) — the first is also the page accent
 _GRADIENTS: dict[str, tuple[tuple, tuple]] = {
     "music":         ((255,  92, 138), (122,  59, 255)),
+    "radio":         ((255,  96,  80), (150,  24,  70)),
     "settings":      ((110, 140, 255), ( 43,  43, 110)),
     "clock":         (( 46, 196, 182), ( 11, 110, 110)),
     "sleep":         ((155,  92, 255), ( 59,  31, 110)),
@@ -79,6 +80,25 @@ def _glyph_music(s: pygame.Surface, n: int) -> None:
     pygame.draw.circle(s, w, (stem_x - int(6 * u), bot_y), int(8 * u))
 
 
+def _glyph_radio(s: pygame.Surface, n: int) -> None:
+    """A transistor radio: body, speaker grille, dial, antenna."""
+    w = (255, 255, 255)
+    cx, cy = n // 2, n // 2
+    u = n / 118.0
+    body = pygame.Rect(0, 0, int(64 * u), int(42 * u))
+    body.center = (cx, cy + int(6 * u))
+    pygame.draw.rect(s, w, body, max(2, int(4 * u)), border_radius=int(8 * u))
+    pygame.draw.circle(s, w, (body.x + int(20 * u), body.centery), int(11 * u),
+                       max(2, int(3 * u)))
+    pygame.draw.circle(s, w, (body.x + int(20 * u), body.centery), int(3 * u))
+    for i in range(3):                              # dial lines
+        y = body.y + int((12 + i * 9) * u)
+        pygame.draw.line(s, w, (body.x + int(40 * u), y),
+                         (body.right - int(10 * u), y), max(2, int(3 * u)))
+    pygame.draw.line(s, w, (body.x + int(14 * u), body.y),
+                     (body.x + int(40 * u), body.y - int(18 * u)), max(2, int(3 * u)))
+
+
 def _glyph_settings(s: pygame.Surface, n: int) -> None:
     w = (255, 255, 255)
     cx, cy = n // 2, n // 2
@@ -134,6 +154,7 @@ def _glyph_customization(s: pygame.Surface, n: int) -> None:
 
 _GLYPHS = {
     "music":         _glyph_music,
+    "radio":         _glyph_radio,
     "settings":      _glyph_settings,
     "clock":         _glyph_clock,
     "sleep":         _glyph_sleep,

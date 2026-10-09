@@ -43,6 +43,11 @@ def crash_dir() -> Path:
     return Path(os.environ.get("MUSI_CRASH_DIR", _BASE / "crash"))
 
 
+def radio_path() -> Path:
+    """Saved radio stations (library/radio.py)."""
+    return Path(os.environ.get("MUSI_RADIO_PATH", _BASE / "radio.json"))
+
+
 def listenbrainz_path() -> Path:
     """ListenBrainz token + user (0600); the listen queue sits beside it."""
     return Path(os.environ.get("MUSI_LISTENBRAINZ_PATH", _BASE / "listenbrainz.json"))

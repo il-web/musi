@@ -6,6 +6,8 @@ ends or is skipped, applies the ListenBrainz/Last.fm rule: a listen is half
 the track or four minutes, whichever comes first, and tracks under 30 s
 don't count at all.
 
+Internet radio is ignored: you didn't pick those songs.
+
 Two receivers today:
   - ListenBrainz (if signed in): 'playing now' at the start, the listen at
     the end — queued, so offline plays go out later.
@@ -17,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import time
+
+from musi.library import remote
 
 MIN_TRACK_S = 30
 MAX_NEEDED_S = 240
@@ -45,6 +49,8 @@ class Scrobbler:
         now = time.monotonic() if now is None else now
         wall = time.time() if wall is None else wall
         path = status.path if getattr(status, "connected", True) else None
+        if remote.is_radio(path):
+            path = None         # radio never counts as a listen (by choice)
         playing = status.state == "play" and bool(path)
         elapsed = float(getattr(status, "elapsed", 0.0) or 0.0)
 
@@ -87,12 +93,12 @@ def _safe(fn, *args) -> None:
 def _default_start(meta: dict) -> None:
     from musi.library import listenbrainz, remote, subsonic
     listenbrainz.playing_now(meta)
-    if remote.is_remote(meta["path"]):
+    if remote.is_server(meta["path"]):
         subsonic.scrobble_async(meta["path"], submission=False)
 
 
 def _default_listen(meta: dict, started_at: float) -> None:
     from musi.library import listenbrainz, remote, subsonic
     listenbrainz.record_listen(meta, started_at)
-    if remote.is_remote(meta["path"]):
+    if remote.is_server(meta["path"]):
         subsonic.scrobble_async(meta["path"], submission=True)

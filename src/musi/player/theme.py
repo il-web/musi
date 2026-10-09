@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 
 import pygame
@@ -69,7 +70,33 @@ def render(
         while text and f.size(text + "...")[0] > max_width:
             text = text[:-1]
         text = text + "..." if text else text
-    return f.render(text, True, colour)
+    return f.render(visual(text), True, colour)
+
+
+# Hebrew / Arabic ranges. pygame draws characters strictly left to right in
+# the order they are stored, so right-to-left text came out mirrored. The
+# Unicode bidi algorithm reorders it into display order — including mixed
+# lines like "Radios 100FM (רדיוס 100FM)". Truncation above works on the
+# logical text first, so "..." lands at the end of what a reader reads.
+_RTL = re.compile(r"[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]")
+
+try:
+    from bidi import get_display as _get_display
+except ImportError:                      # older python-bidi, or not installed
+    try:
+        from bidi.algorithm import get_display as _get_display
+    except ImportError:
+        _get_display = None
+
+
+def visual(text: str) -> str:
+    """``text`` in display order (a no-op for left-to-right text)."""
+    if not text or _get_display is None or not _RTL.search(text):
+        return text
+    try:
+        return _get_display(text)
+    except Exception:
+        return text
 
 
 @lru_cache(maxsize=256)

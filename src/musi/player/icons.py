@@ -118,3 +118,20 @@ def with_cloud(text: pygame.Surface, col: tuple) -> pygame.Surface:
     out.blit(text, (0, 0))
     draw_cloud(out, w + 10, h // 2, col)
     return out
+
+
+def draw_radio(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
+    """Small radio — marks an internet-radio stream (the cloud marks a
+    music-server song)."""
+    pygame.draw.rect(surface, col, (cx - 6, cy - 3, 13, 9), 2, border_radius=2)
+    pygame.draw.circle(surface, col, (cx + 2, cy + 1), 2)
+    pygame.draw.line(surface, col, (cx - 4, cy - 3), (cx + 3, cy - 7), 1)
+
+
+def with_radio(text: pygame.Surface, col: tuple) -> pygame.Surface:
+    """``text`` with the radio tag baked in after it (like with_cloud)."""
+    w, h = text.get_size()
+    out = pygame.Surface((w + CLOUD_W, h), pygame.SRCALPHA)
+    out.blit(text, (0, 0))
+    draw_radio(out, w + 10, h // 2, col)
+    return out

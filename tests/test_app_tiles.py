@@ -12,8 +12,9 @@ from musi.player import app_tiles
 import pytest
 
 
-def test_four_keys():
-    assert app_tiles.KEYS == ("music", "settings", "clock", "sleep", "customization")
+def test_keys():
+    assert app_tiles.KEYS == ("music", "radio", "settings", "clock", "sleep",
+                              "customization")
 
 
 def test_tile_is_square_and_118_by_default():
@@ -41,9 +42,9 @@ def test_centre_is_opaque():
 
 def test_each_app_has_a_distinct_accent():
     accents = {app_tiles.accent(k) for k in app_tiles.KEYS}
-    assert len(accents) == 5
+    assert len(accents) == len(app_tiles.KEYS)
 
 
 def test_unknown_key_raises():
     with pytest.raises(KeyError):
-        app_tiles.render_tile("radio")
+        app_tiles.render_tile("nope")

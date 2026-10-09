@@ -243,6 +243,26 @@ DONE
       radio power-cycle -> retry), errors shown, unnamed audio devices listed
       ("Audio device · EE:FF"), each unnamed address probed once
 
+[x] Radio pack
+    - Launcher app "Radio" (after Music): search bar, Saved stations,
+      "Near you" (TuneIn local radio, by IP). Tap = tune in + Now Playing,
+      heart = save. Search results screen says which directory answered
+    - library/radio.py: TuneIn via its public OPML service (Search / Browse /
+      Tune.ashx — the one Home Assistant + Mopidy-TuneIn use; NOT an official
+      partner API, can change), Radio Browser as automatic fallback. TuneIn
+      stations re-tuned per play (stream URLs move); last good URL kept on
+      the saved station. .pls/.m3u unwrapped. Logos (300 px) + palette cached
+      under art_dir/radio. Saved list cached in memory (no render-loop I/O)
+    - remote.kind(): 'server' (cloud tag) vs 'radio' (radio tag) vs 'local'
+    - Now Playing on radio: logo hero on its own colour, LIVE instead of the
+      bar/times, prev/next = previous/next saved station, heart = save
+      station, no lyrics. Mini bar shows logo + radio tag. Radio never
+      scrobbles (user's call)
+    - theme.visual(): Unicode bidi reordering for Hebrew/Arabic text
+      everywhere (python-bidi, new dep — armv7 wheel exists on PyPI; if the
+      OTA pip step fails it degrades to the old mirrored text, never crashes)
+    - Verified from the Pi: GLGLZ + Radios 100FM stream MP3 with ICY titles
+
 NEXT BIG UPDATE: Device API  (full spec: docs/superpowers/specs/
 2026-07-04-device-api-design.md on the dev machine)
 --------------------------------------------------------------

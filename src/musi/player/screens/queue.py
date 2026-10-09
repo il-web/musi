@@ -95,7 +95,7 @@ class QueueScreen(ListScreen):
                             theme.WHITE if lifted else (120, 230, 140), size="xs")
         tx = 38
         bold  = lifted or is_cur
-        cloud = remote.is_remote(item.path)
+        cloud = remote.is_server(item.path)
         title = theme.render(item.title, 13, theme.WHITE, bold=bold,
                              max_width=212 - (icons.CLOUD_W if cloud else 0))
         r = surface.blit(title, (tx, y + 8))

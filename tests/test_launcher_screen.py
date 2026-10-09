@@ -23,6 +23,7 @@ class FakeApp:
         self.mpd = FakeMPD()
         self.stack = []
         self.remaining = None
+        self.status = FakeStatus()          # the real App always has one
 
     def push(self, screen):
         self.stack.append(screen)
@@ -71,10 +72,10 @@ def _launcher(app):
     return s
 
 
-def test_four_apps_in_order(app):
+def test_apps_in_order(app):
     s = _launcher(app)
     assert [k for k, _ in s.APPS] == [
-        "music", "settings", "clock", "sleep", "customization"]
+        "music", "radio", "settings", "clock", "sleep", "customization"]
 
 
 def test_tap_on_the_tile_opens_the_app(app):
@@ -92,7 +93,7 @@ def test_swipe_does_not_open_an_app(app):
     assert len(app.stack) == 1
 
 
-def test_swipe_left_advances_to_settings(app):
+def test_swipe_left_advances_to_radio(app):
     s = _launcher(app)
     s.on_press(240, 160)
     s.on_drag(60, 160)
@@ -102,7 +103,7 @@ def test_swipe_left_advances_to_settings(app):
     assert s._car.index == 1
     s.on_press(160, 160)
     s.on_release(160, 160)
-    assert app.stack[-1].__class__.__name__ == "SettingsScreen"
+    assert app.stack[-1].__class__.__name__ == "RadioScreen"
 
 
 def test_swipe_right_wraps_to_customization(app):
@@ -112,7 +113,7 @@ def test_swipe_right_wraps_to_customization(app):
     s.on_release(240, 160)
     while s._car.update():
         pass
-    assert s._car.index == 4
+    assert s._car.index == 5
     s.on_press(160, 160)
     s.on_release(160, 160)
     assert app.stack[-1].__class__.__name__ == "CustomizationScreen"
@@ -120,7 +121,7 @@ def test_swipe_right_wraps_to_customization(app):
 
 def test_clock_page_opens_clock(app):
     s = _launcher(app)
-    s._car.index = 2
+    s._car.index = 3
     s.on_press(160, 160)
     s.on_release(160, 160)
     assert app.stack[-1].__class__.__name__ == "ClockScreen"

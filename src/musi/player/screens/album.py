@@ -151,7 +151,7 @@ class AlbumScreen(ListScreen):
         num_s = theme.render(num, 10, theme.WHITE if sel else theme.DIM)
         surface.blit(num_s, num_s.get_rect(center=(bx + 13, bcy)))
 
-        cloud = remote.is_remote(t["path"])
+        cloud = remote.is_server(t["path"])
         lbl = theme.render(t["title"], 12, theme.WHITE, bold=sel,
                            max_width=228 - (icons.CLOUD_W if cloud else 0))
         r = surface.blit(lbl, (50, y + (ITEM_H - 3 - lbl.get_height()) // 2))

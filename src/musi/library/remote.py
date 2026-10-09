@@ -35,3 +35,19 @@ def song_id(path: "str | None") -> str | None:
     if isinstance(path, str) and path.startswith(STREAM_PREFIX):
         return path[len(STREAM_PREFIX):] or None
     return None
+
+
+def kind(path: "str | None") -> str:
+    """'server' (a music-server song), 'radio' (any other stream — musi only
+    hands MPD other URLs for internet radio), or 'local'."""
+    if not is_remote(path):
+        return "local"
+    return "server" if path.startswith(STREAM_PREFIX) else "radio"
+
+
+def is_server(path: "str | None") -> bool:
+    return kind(path) == "server"
+
+
+def is_radio(path: "str | None") -> bool:
+    return kind(path) == "radio"

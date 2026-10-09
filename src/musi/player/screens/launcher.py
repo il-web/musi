@@ -41,6 +41,7 @@ class LauncherScreen(Screen):
 
     APPS: list[tuple[str, str]] = [
         ("music",    "Music"),
+        ("radio",    "Radio"),
         ("settings", "Settings"),
         ("clock",    "Clock"),
         ("sleep",    "Sleep"),
@@ -79,6 +80,9 @@ class LauncherScreen(Screen):
                     "SELECT COUNT(*) FROM albums").fetchone()[0]
             n = self._albums
             return f"{n} album" if n == 1 else f"{n} albums"
+        if key == "radio":
+            from musi.player.screens.radio import subtitle
+            return subtitle(self.app)
         if key == "clock":
             from datetime import datetime
 
@@ -194,6 +198,8 @@ class LauncherScreen(Screen):
         key = self.APPS[idx][0]
         if key == "music":
             from musi.player.screens.music import MusicHostScreen as cls
+        elif key == "radio":
+            from musi.player.screens.radio import RadioScreen as cls
         elif key == "settings":
             from musi.player.screens.settings import SettingsScreen as cls
         elif key == "clock":
