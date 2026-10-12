@@ -350,3 +350,14 @@ def test_tap_on_the_back_crumb_goes_up(db):
     s.handle_touch(20, 40)                         # y < PILL_Y, x < 120
     assert s.artist_id == 0
     assert [i.label for i in s.items] == ["Alpha", "Beta"]
+
+
+def test_new_playlist_still_opens_the_picker_if_mpd_cannot_create(db):
+    mpd = FakeMPD()
+    mpd.playlist_create = lambda name: ""
+    app = FakeApp(db, mpd)
+    s = LibraryScreen(app)
+    s.on_enter()
+    s.set_pill(2)
+    s._create_playlist("Gym")
+    assert app.stack[-1]._add_to == "Gym"

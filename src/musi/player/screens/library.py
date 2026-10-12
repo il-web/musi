@@ -254,9 +254,9 @@ class LibraryScreen(ListScreen):
 
     def _create_playlist(self, text: str) -> None:
         """Make it, open it, and go straight to picking songs for it."""
-        name = self.app.mpd.playlist_create(text)
-        if not name:
-            return
+        # If MPD could not make the empty file, the picker still works: the
+        # first song added creates the playlist (playlistadd creates).
+        name = self.app.mpd.playlist_create(text) or text
         self._load()
         from musi.player.screens.playlist import PlaylistScreen
         from musi.player.screens.search import SearchScreen

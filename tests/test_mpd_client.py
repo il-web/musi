@@ -243,6 +243,8 @@ class FakePlaylistMPD(FakeMPD):
         self.lists.setdefault(name, []).append(uri)
 
     def playlistclear(self, name):
+        if name not in self.lists:             # real MPD: TruncateFile, no create
+            raise ValueError("No such playlist")
         self.lists[name] = []
 
     def playlistdelete(self, name, pos):
@@ -374,3 +376,13 @@ def test_playlist_create_rejects_a_blank_name(tmp_path):
     c = _playlist_client(tmp_path)
     assert c.playlist_create(" / ") == ""
     assert c._client.lists == {}
+
+
+def test_playlist_create_cleans_up_if_the_placeholder_cannot_be_removed(tmp_path):
+    c = _playlist_client(tmp_path)
+
+    def broken_delete(name, pos):
+        raise ValueError("boom")
+    c._client.playlistdelete = broken_delete
+    assert c.playlist_create("Gym") == ""
+    assert "Gym" not in c._client.lists

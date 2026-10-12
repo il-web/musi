@@ -31,6 +31,7 @@ FAVORITES = "Favorites"
 # safe single path segment. MPD itself rejects "/" and a leading ".", but it is
 # friendlier to sanitise here than to surface a protocol error.
 _NAME_MAX = 40
+_PLACEHOLDER_URI = "http://musi.invalid/new-playlist"   # see playlist_create
 
 
 def _safe_playlist_name(name: str) -> str:
@@ -472,8 +473,10 @@ class MusiMPDClient:
         """Create an empty stored playlist; return its final name ('' on failure).
 
         A name already taken gets a number ("Road trip 2") — never touch an
-        existing playlist. ``playlistclear`` on a missing name writes an empty
-        playlist file, which is how MPD creates one with no songs yet.
+        existing playlist. MPD has no "create" command and ``playlistclear``
+        refuses a missing name, but ``playlistadd`` creates the file: add a
+        placeholder stream URL (accepted without a database lookup), then
+        delete it, leaving a real empty playlist.
         """
         if not self._ensure():
             return ""
@@ -487,11 +490,20 @@ class MusiMPDClient:
             while final.casefold() in taken:
                 final = _safe_playlist_name(f"{base[:_NAME_MAX - 4]} {n}")
                 n += 1
-            self._client.playlistclear(final)
-            return final
+            self._client.playlistadd(final, _PLACEHOLDER_URI)
         except Exception:
             self._connected = False
             return ""
+        try:
+            self._client.playlistdelete(final, 0)
+        except Exception:
+            try:
+                self._client.rm(final)     # never leave the placeholder behind
+            except Exception:
+                pass
+            self._connected = False
+            return ""
+        return final
 
     @_synchronized
     def playlist_remove_at(self, name: str, pos: int) -> None:
