@@ -27,6 +27,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 LB_API = "https://api.listenbrainz.org/1"
+SETUP_KEY = "lb-setup"     # the "set your ListenBrainz username" card
 TIMEOUT_S = 15
 MIX_LEN = 50
 
@@ -125,6 +126,18 @@ def _lb_get(path: str, opener=None):
         if resp.status == 204:                    # "no stats yet"
             return None
         return json.loads(resp.read() or b"null")
+
+
+def lb_user_exists(user: str, opener=None) -> bool:
+    """True if ListenBrainz knows ``user``; raises OSError when unreachable."""
+    q = urllib.parse.quote(user)
+    try:
+        _lb_get(f"/user/{q}/playlists/createdfor?count=1", opener)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+    return True
 
 
 def lb_generated(user: str, opener=None) -> dict[str, tuple[str, list[tuple[str, str]]]]:
@@ -239,13 +252,21 @@ def build(db, lb_user: str | None = None, now: float | None = None,
     lb_month = lb_all = None
     generated: dict = {}
     if lb_user:
+        # separately: no stats yet (or a stats error) must not cost the
+        # generated playlists, and vice versa
         try:
             lb_month = lb_top(lb_user, "month", opener)
             lb_all = lb_top(lb_user, "all_time", opener)
+        except Exception:
+            log.info("mixes: ListenBrainz stats unavailable", exc_info=True)
+        try:
             generated = lb_generated(lb_user, opener)
         except Exception:
-            log.info("mixes: ListenBrainz unreachable", exc_info=True)
+            log.info("mixes: ListenBrainz playlists unavailable", exc_info=True)
     mixes: list[Mix] = []
+    if not lb_user:                       # say where the ListenBrainz mixes are
+        mixes.append(Mix(SETUP_KEY, "ListenBrainz mixes", "Tap to set your username",
+                         colours=((120, 120, 140), (50, 50, 66))))
     rep = on_repeat(db, lib, lb_month, now)
     fav = forgotten(db, lib, lb_all, lb_month, now)
     day = daily_mix(db, lib, [m for m in (rep, fav) if m], now)
@@ -315,6 +336,7 @@ REFRESH_S = 30 * 60
 _ready: list[Mix] = []
 _built_at = 0.0
 _building = False
+_built_for: str | None = None   # the ListenBrainz user the current set used
 _version = 0          # bumps when a new set lands, so screens know to redraw
 
 
@@ -327,17 +349,20 @@ def refresh_async(db_path, force: bool = False) -> bool:
     build started. Uses its own database connection."""
     global _building
     import threading
-    if _building or (not force and time.time() - _built_at < REFRESH_S):
+    user = lb_user()
+    stale = time.time() - _built_at >= REFRESH_S or user != _built_for
+    if _building or not (force or stale):
         return False
     _building = True
 
     def work() -> None:
-        global _ready, _built_at, _building, _version
+        global _ready, _built_at, _built_for, _building, _version
         conn = None
         try:
             from musi.library.db import open_db
             conn = open_db(db_path)
-            _ready = build(conn, lb_user())
+            _ready = build(conn, user)
+            _built_for = user
             _built_at = time.time()
             _version += 1
         except Exception:

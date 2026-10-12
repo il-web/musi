@@ -306,9 +306,13 @@ class HomeScreen(Screen):
 
         if axis is None:                       # never passed the slop → a tap
             di = shelf.index_at(x - MARGIN)
-            if 0 <= di < len(rows) and _is_mix(rows[di]):
+            mix = rows[di]["mix"] if 0 <= di < len(rows) and _is_mix(rows[di]) else None
+            if mix is not None and mix.key == mixes_lib.SETUP_KEY:
+                from musi.player.screens.listenbrainz import ListenBrainzScreen
+                self.app.push(ListenBrainzScreen(self.app))
+            elif mix is not None:
                 from musi.player.screens.mix import MixScreen
-                self.app.push(MixScreen(self.app, rows[di]["mix"]))
+                self.app.push(MixScreen(self.app, mix))
             elif 0 <= di < len(rows):
                 from musi.player.screens.album import AlbumScreen
                 self.app.push(AlbumScreen(self.app, rows[di]["id"]))

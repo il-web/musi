@@ -202,3 +202,57 @@ def test_mix_screen_lists_missing_songs_without_playing_them():
     from musi.player.input import Button
     s.handle(Button.SELECT, st)
     assert App.mpd.calls == []                  # nothing playable, nothing played
+
+
+def test_without_a_listenbrainz_user_a_setup_card_leads_the_shelf(db):
+    made = mixes.build(db, None, NOW)
+    assert made[0].key == mixes.SETUP_KEY
+    assert mixes.SETUP_KEY not in [m.key for m in mixes.build(db, "ilay", NOW,
+                                                              opener=lambda u: None)]
+
+
+def test_stats_failure_does_not_lose_the_generated_playlists(db):
+    lb = FakeLB()
+
+    def flaky(url):
+        if "/stats/user/" in url:
+            raise OSError("stats down")
+        return lb(url)
+    assert "weekly-jams" in [m.key for m in mixes.build(db, "ilay", NOW, opener=flaky)]
+
+
+def test_lb_user_exists():
+    import urllib.error
+
+    def missing(url):
+        raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+    assert mixes.lb_user_exists("nobody", opener=missing) is False
+    assert mixes.lb_user_exists("ilay", opener=lambda u: {"playlists": []}) is True
+
+
+def test_listenbrainz_screen_sets_the_mixes_username(monkeypatch):
+    import threading
+    import pygame
+    pygame.init()
+    from musi.player import prefs
+    from musi.player.screens import listenbrainz as lbs
+    saved = {}
+    monkeypatch.setattr(prefs, "set", lambda k, v: saved.__setitem__(k, v))
+    monkeypatch.setattr(lbs.listenbrainz, "load_settings", lambda: None)
+
+    class SyncThread:
+        def __init__(self, target, daemon=None): self.t = target
+        def start(self): self.t()
+    monkeypatch.setattr(threading, "Thread", SyncThread)
+
+    class App:
+        stack = []
+    s = lbs.ListenBrainzScreen(App())
+    s.check_user(" ilay ", opener=lambda u: {"playlists": []})
+    assert saved == {"listenbrainz_user": "ilay"} and not s.error
+
+    import urllib.error
+    def missing(url):
+        raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+    s.check_user("nobody", opener=missing)
+    assert "nobody" in s.error
