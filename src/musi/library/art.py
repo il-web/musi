@@ -1,7 +1,8 @@
 """Album art processing pipeline.
 
 For each album produces:
-  - 160x160 thumbnail  (album grid / cards)
+  - 320x320 thumbnail  (album grid / cards / Now Playing — the panel is 320
+    wide, so this is full sharpness everywhere; it was 160 px until 2026-10)
   - 320x480 backdrop   (blurred, darkened — Now Playing background)
   - colour palette     (list of hex strings for UI accent colours)
 
@@ -18,7 +19,8 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from musi.library.tags import extract_embedded_art
 
-THUMB_SIZE    = (160, 160)
+THUMB_SIZE    = (320, 320)
+OLD_THUMB     = (160, 160)
 BACKDROP_SIZE = (320, 480)
 PALETTE_N     = 4
 
@@ -137,7 +139,35 @@ def _get_source_image(audio_path: Path) -> Optional[Image.Image]:
 # ── image generation ──────────────────────────────────────────────────────────
 
 def _save_thumb(img: Image.Image, path: Path) -> None:
-    _crop_square(img).resize(THUMB_SIZE, Image.LANCZOS).save(path, "JPEG", quality=85)
+    _crop_square(img).resize(THUMB_SIZE, Image.LANCZOS).save(path, "JPEG", quality=90)
+
+
+def upgrade_thumb(audio_path: Path, art_dir: Path, album_key: str) -> bool:
+    """Re-render an old small thumb at THUMB_SIZE from the album's own art.
+
+    Only when the existing thumb is smaller AND it was made from this same
+    source (an old-size render of the source matches it) — a cover the user
+    or the fetcher put in place is left alone, and so is the generated
+    gradient of an art-less album. True if the thumb was replaced.
+    """
+    thumb_path = art_dir / f"{album_slug(album_key)}_thumb.jpg"
+    try:
+        with Image.open(thumb_path) as cur:
+            if cur.width >= THUMB_SIZE[0]:
+                return False
+            current = cur.convert("RGB")
+    except Exception:
+        return False
+    src = _get_source_image(audio_path)
+    if src is None:
+        return False
+    old = _crop_square(src).resize(current.size, Image.LANCZOS)
+    from PIL import ImageChops, ImageStat
+    diff = ImageStat.Stat(ImageChops.difference(old, current)).mean
+    if sum(diff) / len(diff) > 12:          # not made from this art: keep it
+        return False
+    _save_thumb(src, thumb_path)
+    return True
 
 
 def _save_backdrop(img: Image.Image, path: Path, *, blur: bool) -> None:

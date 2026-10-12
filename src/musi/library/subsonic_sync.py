@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from musi.library import art, remote
+from musi.library import art, quality, remote
 from musi.library.subsonic import Client, SubsonicError, update_settings
 
 BATCH = 200
@@ -93,16 +93,22 @@ def sync(client: Client, conn: sqlite3.Connection, art_dir: Path, *,
         artist_id = _artist(conn, album_artist)
         album_id = _album(conn, artist_id, album_title,
                           album.get("year") or song.get("year"))
+        q = quality.from_subsonic(song)
         conn.execute(
             """INSERT INTO tracks (album_id, artist_id, path, title,
-                                   track_number, disc_number, duration, file_mtime)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                                   track_number, disc_number, duration, file_mtime,
+                                   codec, bitrate, sample_rate, bit_depth, channels)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                ON CONFLICT(path) DO UPDATE SET
                    album_id = excluded.album_id, artist_id = excluded.artist_id,
                    title = excluded.title, track_number = excluded.track_number,
-                   disc_number = excluded.disc_number, duration = excluded.duration""",
+                   disc_number = excluded.disc_number, duration = excluded.duration,
+                   codec = excluded.codec, bitrate = excluded.bitrate,
+                   sample_rate = excluded.sample_rate, bit_depth = excluded.bit_depth,
+                   channels = excluded.channels""",
             (album_id, artist_id, path, title, song.get("track"),
-             song.get("discNumber") or 1, song.get("duration")),
+             song.get("discNumber") or 1, song.get("duration"),
+             *(q.get(k) for k in quality.FIELDS)),
         )
         stats["updated" if path in known else "added"] += 1
         if (i + 1) % BATCH == 0:

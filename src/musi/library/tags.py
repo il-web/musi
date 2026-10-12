@@ -1,12 +1,16 @@
 """Audio tag reading via mutagen."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import mutagen
 
-AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".opus"}
+from musi.library import quality
+
+AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".opus",
+                    # Dolby (AC-3 / E-AC-3), and the other lossless formats MPD plays
+                    ".ac3", ".eac3", ".ec3", ".aif", ".aiff", ".dsf", ".wv", ".ape"}
 
 
 @dataclass
@@ -21,6 +25,7 @@ class TrackTags:
     year: Optional[int]
     duration: float
     has_embedded_art: bool
+    quality: dict = field(default_factory=dict)   # see library/quality.py
 
 
 def is_audio_file(path: Path) -> bool:
@@ -57,6 +62,7 @@ def read_tags(path: Path) -> Optional[TrackTags]:
         year=year,
         duration=duration,
         has_embedded_art=_has_embedded_art(path),
+        quality=quality.probe(path),
     )
 
 

@@ -5,7 +5,7 @@ import random
 
 import pygame
 
-from musi.library import remote
+from musi.library import quality, remote
 from musi.player import art_cache, audio_detect, icons, minibar, statusbar, theme
 from musi.player.input import Button
 from musi.player.list_screen import ListScreen
@@ -20,6 +20,33 @@ ART_Y    = 34
 
 PLAY_RECT    = pygame.Rect(24, 216, 176, 42)
 SHUFFLE_RECT = pygame.Rect(208, 216, 88, 42)
+
+
+# album quality tags (library/quality.py): (fill, border, text) per kind
+_BADGE = {
+    "format":   (None,            (110, 110, 130), (225, 225, 235)),
+    "dolby":    ((235, 235, 240), None,            (12, 12, 16)),
+    "hires":    ((214, 168, 72),  None,            (20, 14, 4)),
+    "lossless": (None,            (110, 190, 160), (150, 220, 190)),
+    "lossy":    (None,            (80, 80, 96),    (150, 150, 165)),
+    "surround": (None,            (160, 160, 180), (225, 225, 235)),
+}
+
+
+def _badge(label: str, kind: str) -> pygame.Surface:
+    """One small pill, opaque on the page background (no alpha layers)."""
+    fill, border, fg = _BADGE.get(kind, _BADGE["format"])
+    text = theme.render(label, 9, fg, bold=True)
+    w, h = text.get_width() + 12, 16
+    pill = pygame.Surface((w, h))
+    pill.fill(theme.BG)
+    rect = pill.get_rect()
+    if fill:
+        pygame.draw.rect(pill, fill, rect, border_radius=8)
+    if border:
+        pygame.draw.rect(pill, border, rect, 1, border_radius=8)
+    pill.blit(text, text.get_rect(center=rect.center))
+    return pill
 
 
 def _fmt_total(seconds: float) -> str:
@@ -47,6 +74,8 @@ class AlbumScreen(ListScreen):
         self._title_surf: pygame.Surface | None = None
         self._sub_surf:   pygame.Surface | None = None
         self._meta_surf:  pygame.Surface | None = None
+        self._badges: list[tuple[str, str]] = []   # quality tags
+        self._badge_surfs: list[pygame.Surface] | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -70,7 +99,8 @@ class AlbumScreen(ListScreen):
                                                do_brighten=True)
 
         rows = self.app.db.execute(
-            """SELECT path, title, track_number, duration
+            """SELECT path, title, track_number, duration,
+                      codec, bitrate, sample_rate, bit_depth, channels
                FROM tracks WHERE album_id = ?
                ORDER BY disc_number, track_number""",
             (self._album_id,),
@@ -81,8 +111,11 @@ class AlbumScreen(ListScreen):
         self._meta_line = f"{n} song{'s' if n != 1 else ''} · {_fmt_total(total)}"
         self._klist.set_count(n, reset=True)
 
+        self._badges = quality.badges(self._tracks, self._album_title)
+
         # rebuild text surfaces with fresh data
         self._title_surf = self._sub_surf = self._meta_surf = None
+        self._badge_surfs = None
 
     # ── draw ──────────────────────────────────────────────────────────────────
 
@@ -93,6 +126,8 @@ class AlbumScreen(ListScreen):
             self._sub_surf   = theme.render(self._sub_line, 11, theme.DIM,
                                             max_width=300)
             self._meta_surf  = theme.render(self._meta_line, 10, theme.DIM)
+        if self._badge_surfs is None:
+            self._badge_surfs = [_badge(label, kind) for label, kind in self._badges]
 
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
@@ -113,8 +148,7 @@ class AlbumScreen(ListScreen):
                      self._title_surf.get_rect(centerx=160, y=160))
         surface.blit(self._sub_surf,
                      self._sub_surf.get_rect(centerx=160, y=182))
-        surface.blit(self._meta_surf,
-                     self._meta_surf.get_rect(centerx=160, y=199))
+        self._draw_meta_row(surface, 197)
 
         # ── buttons ───────────────────────────────────────────────────────────
         pygame.draw.rect(surface, self._accent, PLAY_RECT, border_radius=21)
@@ -136,6 +170,19 @@ class AlbumScreen(ListScreen):
             surface.blit(msg, msg.get_rect(centerx=160, y=LIST_Y + 40))
 
         minibar.draw(surface, self.app, status)
+
+    def _draw_meta_row(self, surface: pygame.Surface, y: int) -> None:
+        """'12 songs · 43 min' and the quality tags, centred on one line;
+        tags that don't fit are dropped from the end."""
+        gap = 5
+        items = [self._meta_surf] + list(self._badge_surfs or [])
+        width = lambda: sum(i.get_width() for i in items) + gap * (len(items) - 1)  # noqa: E731
+        while len(items) > 1 and width() > 300:
+            items.pop()
+        x = 160 - width() // 2
+        for item in items:
+            surface.blit(item, (x, y + (16 - item.get_height()) // 2))
+            x += item.get_width() + gap
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         t   = self._tracks[di]

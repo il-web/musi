@@ -6,6 +6,7 @@ from pathlib import Path
 MIGRATIONS = [
     "001_initial.sql",
     "002_fts.sql",
+    "003_quality.sql",
 ]
 
 

@@ -9,16 +9,34 @@ import pygame
 from musi.player import theme
 
 
+def _scaled(path: str, size: tuple[int, int]) -> pygame.Surface | None:
+    """An image at ``size``, resized with a proper filter.
+
+    pygame.transform.scale is nearest-neighbour: covers came out jagged and
+    blocky. Resizing is done in Pillow (Lanczos) and the result handed to
+    pygame as a plain opaque RGB surface — no alpha, no smoothscale, so none
+    of the armv7 blit paths that crash the Pi (see blit.py)."""
+    if not path or not Path(path).exists():
+        return None
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            if im.size != size:
+                im = im.resize(size, Image.LANCZOS)
+            return pygame.image.frombytes(im.tobytes(), size, "RGB").convert()
+    except Exception:
+        try:
+            img = pygame.image.load(path).convert()
+            return pygame.transform.scale(img, size)
+        except Exception:
+            return None
+
+
 @lru_cache(maxsize=100)
 def load_art_thumbnail(art_path: str, size: int = 46) -> pygame.Surface | None:
     """Load and scale a thumbnail with an LRU cache."""
-    if not art_path or not Path(art_path).exists():
-        return None
-    try:
-        img = pygame.image.load(art_path).convert()
-        return pygame.transform.scale(img, (size, size))
-    except Exception:
-        return None
+    return _scaled(art_path, (size, size))
 
 
 def get_track_art_and_palette(db, path: str, artist: str, album: str) -> dict:
@@ -72,10 +90,4 @@ def load_surface(path: str, size: tuple[int, int]) -> pygame.Surface | None:
     it, so an uncached decode here blocks the UI thread and starves MPD of the
     Zero W's single core — audible as a stutter at the track boundary.
     """
-    if not path or not Path(path).exists():
-        return None
-    try:
-        img = pygame.image.load(path).convert()
-        return pygame.transform.scale(img, size)
-    except Exception:
-        return None
+    return _scaled(path, size)
