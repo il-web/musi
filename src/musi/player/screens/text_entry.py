@@ -15,11 +15,11 @@ import pygame
 
 from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
-from musi.player.keyboard import Keyboard
+from musi.player.keyboard import HEIGHT as KB_HEIGHT, Keyboard
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
 
-KB_TOP  = 318
+KB_TOP  = 480 - KB_HEIGHT - 4     # 292 — a little clear of the bezel
 BOX_Y   = 92
 BOX_H   = 42
 _BLINK  = 0.55          # seconds per cursor blink half-cycle
@@ -64,6 +64,20 @@ class TextEntryScreen(Screen):
             self._on_key(self._kb.key_at(x, y))
             return None
         return None
+
+    # the keyboard captures its gesture: the key under the finger at lift-off
+    # types, so a press that slides a little still lands
+    def on_press(self, x: int, y: int) -> bool:
+        if not self._kb.contains(x, y):
+            return False
+        self._kb.press(x, y)
+        return True
+
+    def on_drag(self, x: int, y: int) -> None:
+        self._kb.drag(x, y)
+
+    def on_release(self, x: int, y: int) -> None:
+        self._on_key(self._kb.release(x, y))
 
     def _on_key(self, key: "str | None") -> None:
         if key is None:

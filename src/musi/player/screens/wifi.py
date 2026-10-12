@@ -11,7 +11,7 @@ import pygame
 
 from musi.player import audio_detect, statusbar, theme
 from musi.player.input import Button
-from musi.player.keyboard import Keyboard
+from musi.player.keyboard import HEIGHT as KB_HEIGHT, Keyboard
 from musi.player.mpd_client import PlayerStatus
 from musi.player.list_screen import ListScreen
 from musi.player.widgets import draw_scrollbar
@@ -21,7 +21,7 @@ LIST_Y  = 64
 ITEM_H  = 50
 NAV_Y   = 456
 MAX_VIS = (NAV_Y - LIST_Y) // ITEM_H   # 7
-KB_TOP  = 318                          # on-screen keyboard (password entry)
+KB_TOP  = 480 - KB_HEIGHT - 4          # on-screen keyboard (password entry)
 
 # ── states ────────────────────────────────────────────────────────────────────
 _S_SCANNING   = "scanning"
@@ -132,6 +132,18 @@ class WifiScreen(ListScreen):
         if self._state in (_S_DONE, _S_ERROR, _S_UNSUPPORTED):
             return Button.BACK                    # tap anywhere to dismiss
         return super().handle_touch(x, y)
+
+    def on_press(self, x: int, y: int) -> bool:
+        if self._state != _S_PASSWORD or not self._kb.contains(x, y):
+            return False
+        self._kb.press(x, y)
+        return True
+
+    def on_drag(self, x: int, y: int) -> None:
+        self._kb.drag(x, y)
+
+    def on_release(self, x: int, y: int) -> None:
+        self._on_key(self._kb.release(x, y))
 
     def go_back(self) -> None:
         """Swipe backs out of password entry first, then off the screen."""
