@@ -92,21 +92,54 @@ def test_release_is_a_no_op_off_the_device(monkeypatch):
     assert splash.release(run=lambda *a, **k: pytest.fail("ran")) is False
 
 
-def test_release_tries_plain_then_sudo(monkeypatch):
+def _device(monkeypatch):
     monkeypatch.setattr(splash.sys, "platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)
+
+
+def test_release_quits_through_sudo_first(monkeypatch):
+    """Plymouth answers only to root: the sudo rule is the way that works."""
+    _device(monkeypatch)
     state = {"up": True, "calls": []}
-    monkeypatch.setattr(splash, "_running", lambda exe: state["up"])
-    monkeypatch.setattr(splash.time, "sleep", lambda s: None)
 
     def run(cmd, **kw):
         state["calls"].append(cmd)
         if cmd[0] == "sudo":
-            state["up"] = False            # only root may quit it
+            state["up"] = False
 
-    assert splash.release(run=run, exe="/usr/bin/plymouth") is True
-    assert state["calls"] == [["/usr/bin/plymouth", "quit", "--retain-splash"],
-                              ["sudo", "-n", "/usr/bin/plymouth", "quit", "--retain-splash"]]
+    assert splash.release(run=run, is_running=lambda: state["up"]) is True
+    assert state["calls"] == [["sudo", "-n", "/usr/bin/plymouth", "quit", "--retain-splash"]]
+
+
+def test_release_waits_until_the_splash_has_let_go(monkeypatch):
+    """Opening the display under Plymouth = no DRM master = frozen panel."""
+    _device(monkeypatch)
+    t = {"now": 0.0}
+    gone_at = 12.0                                   # the boot-end fallback
+
+    def sleep(dt):
+        t["now"] += dt
+
+    up = lambda: t["now"] < gone_at                  # noqa: E731
+    assert splash.release(run=lambda *a, **k: None, is_running=up,
+                          sleep=sleep, clock=lambda: t["now"]) is True
+    assert t["now"] >= gone_at                       # didn't return early
+
+
+def test_release_does_nothing_when_no_splash(monkeypatch):
+    _device(monkeypatch)
+    assert splash.release(run=lambda *a, **k: pytest.fail("ran"),
+                          is_running=lambda: False) is False
+
+
+def test_running_reads_the_process_list(tmp_path):
+    (tmp_path / "1").mkdir()
+    (tmp_path / "1" / "comm").write_text("systemd")
+    (tmp_path / "self").mkdir()
+    assert splash.running(tmp_path) is False
+    (tmp_path / "412").mkdir()
+    (tmp_path / "412" / "comm").write_text("plymouthd")
+    assert splash.running(tmp_path) is True
 
 
 def test_ui_service_no_longer_quits_the_splash_early():

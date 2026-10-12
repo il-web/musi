@@ -1,57 +1,72 @@
 """Hand the screen over from the Plymouth boot splash to the app.
 
-Plymouth holds the panel until it quits, and the app can't open the display
-while it does. Quitting it early — when the service starts, as musi-ui.service
-used to — left seconds of bare console on the panel while Python imported.
-So the app quits it itself, as late as possible: right before it opens the
-display. ``--retain-splash`` keeps the last splash frame on the panel until
-the app's first frame (the same picture — see boot_look.py) replaces it.
+Plymouth holds the panel (DRM master) until it quits. If the app opens the
+display before that, SDL never becomes master and every frame fails with
+"Could not queue pageflip: -13" — the panel stays frozen on the splash even
+after Plymouth exits. So the app quits the splash itself, as late as
+possible (right before it opens the display), and waits until it is really
+gone. ``--retain-splash`` keeps the last splash frame on the panel until the
+app's first frame (the same picture — see boot_look.py) replaces it.
 
-Plymouth may only take orders from root, so a plain ``plymouth quit`` is
-tried first and then the one sudoers rule for it (install.sh / update.sh
-step 12). If neither works the boot-end fallback (plymouth-quit.service's
-musi drop-in) quits it anyway.
+Plymouth answers only to root — even ``plymouth --ping`` from this user just
+fails, which looks exactly like "not running". So whether it runs is read
+from /proc (plymouthd's process), and the quit goes through the one sudoers
+rule for it (install.sh). The boot-end fallback (plymouth-quit.service's musi
+drop-in) quits it after 30 s regardless; we wait a bit longer than that.
 """
 from __future__ import annotations
 
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 PLYMOUTH = "/usr/bin/plymouth"
 QUIT = ["quit", "--retain-splash"]
+WAIT_S = 35.0                 # > the drop-in's 30 s fallback
 
 
-def _running(exe: str) -> bool:
+def running(proc: Path = Path("/proc")) -> bool:
+    """plymouthd is alive (no root needed: it's just a process name)."""
     try:
-        return subprocess.run([exe, "--ping"], capture_output=True,
-                              timeout=2).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
+        entries = list(proc.iterdir())
+    except OSError:
         return False
+    for d in entries:
+        if not d.name.isdigit():
+            continue
+        try:
+            if (d / "comm").read_text().strip() == "plymouthd":
+                return True
+        except OSError:
+            continue
+    return False
 
 
-def release(run=subprocess.run, exe: str | None = None) -> bool:
-    """Quit the boot splash if it is up. True if it was (and was asked to go).
-
-    Only on the device (Linux, no desktop): on a dev machine there is none."""
+def release(run=subprocess.run, is_running=running, sleep=time.sleep,
+            clock=time.monotonic, wait_s: float = WAIT_S) -> bool:
+    """Quit the boot splash if it is up and wait until it has let go of the
+    panel. True if it was up. Only on the device (Linux, no desktop)."""
     if sys.platform != "linux" or os.environ.get("DISPLAY"):
         return False
-    exe = exe or shutil.which("plymouth") or (PLYMOUTH if os.path.exists(PLYMOUTH) else None)
-    if not exe or not _running(exe):
+    if not is_running():
         return False
-    for cmd in ([exe, *QUIT], ["sudo", "-n", PLYMOUTH, *QUIT]):
+    for cmd in (["sudo", "-n", PLYMOUTH, *QUIT], [PLYMOUTH, *QUIT]):
         try:
-            run(cmd, capture_output=True, timeout=4)
+            run(cmd, capture_output=True, timeout=5)
         except (OSError, subprocess.TimeoutExpired):
             continue
-        for _ in range(20):                       # up to 1 s to let go
-            if not _running(exe):
-                return True
-            time.sleep(0.05)
-    log.warning("boot splash would not quit; the display may not open")
+        if not is_running():
+            return True
+    # Not gone yet: never open the display under it — wait for it (the
+    # boot-end fallback quits it at the latest).
+    deadline = clock() + wait_s
+    while is_running() and clock() < deadline:
+        sleep(0.1)
+    if is_running():
+        log.warning("boot splash still up after %.0f s; opening the display anyway", wait_s)
     return True

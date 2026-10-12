@@ -294,13 +294,28 @@ grep -q '^panel-mipi-dbi' /etc/initramfs-tools/modules 2>/dev/null || \
     printf 'spi-bcm2835\npanel-mipi-dbi\nmipi-dbi\n' | sudo tee -a /etc/initramfs-tools/modules > /dev/null
 sudo sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf 2>/dev/null || true
 sudo plymouth-set-default-theme musi 2>/dev/null || true
-sudo update-initramfs -u 2>/dev/null || true
+
+# The boot image (with the splash in it) and cmdline.txt live on the boot
+# partition. If it's mounted read-only (write-protected boot), both writes
+# fail — the old splash keeps showing and the console settings never land.
+# Unlock it for these two steps, put it back after, and say so if it fails.
+SPLASH_BOOT=/boot/firmware
+[ -d "$SPLASH_BOOT" ] || SPLASH_BOOT=/boot
+SPLASH_BOOT_RO=0
+if findmnt -no OPTIONS "$SPLASH_BOOT" 2>/dev/null | tr ',' '\n' | grep -qx ro; then
+    SPLASH_BOOT_RO=1
+    sudo mount -o remount,rw "$SPLASH_BOOT" || warn "could not unlock $SPLASH_BOOT for writing"
+fi
+if sudo update-initramfs -u; then
+    ok "boot image rebuilt with the new splash"
+else
+    warn "update-initramfs failed — the old splash will keep showing"
+fi
 
 # No console on the panel, ever: boot messages to tty3 and quiet, no cursor,
 # no boot logo, no login prompt on tty1 (SSH is unaffected). cmdline.txt is
 # ONE line: edit in place.
-SPLASH_CMDLINE=/boot/firmware/cmdline.txt
-[ -f "$SPLASH_CMDLINE" ] || SPLASH_CMDLINE=/boot/cmdline.txt
+SPLASH_CMDLINE="$SPLASH_BOOT/cmdline.txt"
 if [ -f "$SPLASH_CMDLINE" ]; then
     sudo sed -i -e '1s/console=tty1\([[:space:]]\|$\)/console=tty3\1/' "$SPLASH_CMDLINE"
     for tok in quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0 \
@@ -309,7 +324,14 @@ if [ -f "$SPLASH_CMDLINE" ]; then
             sudo sed -i -e '1s/[[:space:]]*$//' -e "1s/\$/ $tok/" "$SPLASH_CMDLINE"
         fi
     done
+    if head -n 1 "$SPLASH_CMDLINE" | tr ' ' '\n' | grep -qxF loglevel=3 \
+            && ! head -n 1 "$SPLASH_CMDLINE" | tr ' ' '\n' | grep -qxF console=tty1; then
+        ok "boot messages kept off the screen"
+    else
+        warn "could not update $SPLASH_CMDLINE — boot text may still show"
+    fi
 fi
+[ "$SPLASH_BOOT_RO" = 1 ] && sudo mount -o remount,ro "$SPLASH_BOOT"
 sudo systemctl mask getty@tty1.service 2>/dev/null || true
 # The app quits the splash right before it opens the display; at the end of
 # boot, plymouth-quit only falls back to that after 30 s, keeping the frame.

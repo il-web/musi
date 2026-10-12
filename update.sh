@@ -366,6 +366,16 @@ root_12() {
     src="${3:-$REPO/plymouth}"
     visudo="${4:-visudo}"
 
+    boot="$root/boot/firmware"
+    [ -d "$boot" ] || boot="$root/boot"
+    # A write-protected boot partition would silently keep the old splash
+    # in the boot image and the old cmdline.txt: unlock it for this step.
+    boot_ro=0
+    if [ -z "$root" ] && findmnt -no OPTIONS "$boot" 2>/dev/null | tr ',' '\n' | grep -qx ro; then
+        boot_ro=1
+        mount -o remount,rw "$boot" || say "!! could not unlock $boot for writing"
+    fi
+
     theme="$root/usr/share/plymouth/themes/musi"
     if [ -f "$src/musi.script" ]; then
         mkdir -p "$theme"
@@ -373,12 +383,10 @@ root_12() {
         cp "$src"/* "$theme"/
         if [ -z "$root" ]; then
             plymouth-set-default-theme musi 2>/dev/null || true
-            update-initramfs -u > /dev/null 2>&1 || true
+            update-initramfs -u > /dev/null 2>&1 || say "!! update-initramfs failed"
         fi
     fi
 
-    boot="$root/boot/firmware"
-    [ -d "$boot" ] || boot="$root/boot"
     cmdline="$boot/cmdline.txt"
     if [ -f "$cmdline" ]; then
         # one line: edit in place, never add a line
@@ -415,6 +423,7 @@ EOF
     fi
     rm -f "$tmp"
 
+    [ "$boot_ro" = 1 ] && mount -o remount,ro "$boot"
     "$sysctl" daemon-reload 2>/dev/null || true
     return 0
 }
