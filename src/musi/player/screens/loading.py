@@ -173,3 +173,6 @@ class LoadingScreen(Screen):
         launcher = LauncherScreen(self.app)
         self.app._stack.append(launcher)
         launcher.on_enter()
+        # "system update needed" / "restart to finish" — once, on top of Home
+        from musi.player.screens.system_update import maybe_show
+        maybe_show(self.app)

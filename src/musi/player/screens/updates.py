@@ -10,7 +10,8 @@ import time
 
 import pygame
 
-from musi.player import audio_detect, crashguard, hardening, statusbar, theme, updater
+from musi.player import (audio_detect, crashguard, hardening, statusbar, sysupdate,
+                          theme, updater)
 from musi.player.input import Button
 from musi.player.mpd_client import PlayerStatus
 from musi.player.screen import Screen
@@ -39,6 +40,10 @@ class UpdatesScreen(Screen):
         self._prog_shown: float = 0.0   # animated (eased) fraction
         self._prog_label: str   = ""
         self._crash: dict | None = None
+        # system update (install.sh over SSH, then restart / refresh)
+        self._sys = sysupdate.SystemUpdate("none")
+        self._sys_at = 0.0
+        self._sys_btn: pygame.Rect | None = None
 
     def on_enter(self) -> None:
         self._crash  = crashguard.last_crash()
@@ -135,8 +140,18 @@ class UpdatesScreen(Screen):
                              (CRASH_RECT.right - 4, CRASH_RECT.y + 11),
                              (CRASH_RECT.right - 8, CRASH_RECT.y + 15), 2)
 
+        # system update card — takes the changelog's place while it's needed
+        if time.monotonic() - self._sys_at >= 2.0:
+            self._sys_at = time.monotonic()
+            self._sys = sysupdate.check()
+        self._sys_btn = None
+        if self._sys.kind != "none":
+            from musi.player.screens.system_update import draw_card
+            h = 150 if self._sys.kind == "install" else 130
+            self._sys_btn = draw_card(surface, pygame.Rect(14, LOG_Y - 4, 292, h),
+                                      self._sys, compact=True)
         # "What's new" changelog
-        if st and st.available and st.changelog:
+        elif st and st.available and st.changelog:
             self._draw_changelog(surface, st.changelog)
 
         # buttons
@@ -224,7 +239,13 @@ class UpdatesScreen(Screen):
             return None        # modal — block input during update
         if y < 26:
             return Button.HOME
-        if self._crash and CRASH_RECT.collidepoint(x, y):
+        if self._sys_btn and self._sys_btn.collidepoint(x, y):
+            self._msg = "Restarting…" if self._sys.kind == "reboot" else "Refreshing…"
+            try:
+                sysupdate.act(self._sys.kind)
+            except Exception as exc:
+                self._msg = f"Failed: {exc}"
+        elif self._crash and CRASH_RECT.collidepoint(x, y):
             from musi.player.screens.crash_log import CrashLogScreen
             self.app.push(CrashLogScreen(self.app))
         elif CHECK_RECT.collidepoint(x, y):

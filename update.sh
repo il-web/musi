@@ -35,6 +35,11 @@ ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
 LATEST_STEP=12
 
+# Steps that only take effect after a reboot (boot config, kernel command
+# line, boot splash). After install.sh applies one, the app offers
+# "Restart"; otherwise "Refresh UI" is enough (player/sysupdate.py).
+REBOOT_STEPS="5 9 12"
+
 say() { printf '[update] %s\n' "$*"; }
 
 # ══ steps ══════════════════════════════════════════════════════════════════════
