@@ -19,8 +19,9 @@ ITEM_H = 50
 LIST_Y = 138
 NAV_Y  = minibar.BAR_Y
 
-PLAY_RECT    = pygame.Rect(24, 84, 176, 42)
-SHUFFLE_RECT = pygame.Rect(208, 84, 88, 42)
+PLAY_RECT    = pygame.Rect(24, 84, 144, 42)
+SHUFFLE_RECT = pygame.Rect(176, 84, 56, 42)
+ADD_RECT     = pygame.Rect(240, 84, 56, 42)     # "Add songs" → search picker
 
 HANDLE_X    = 292
 HANDLE_ZONE = 262            # x >= this → drag handle; x < this → tap the row
@@ -92,10 +93,15 @@ class PlaylistScreen(ListScreen):
         pygame.draw.rect(surface, theme.ACCENT, SHUFFLE_RECT, 1, border_radius=21)
         _draw_shuffle(surface, SHUFFLE_RECT.centerx, SHUFFLE_RECT.centery,
                       theme.ACCENT)
+        pygame.draw.rect(surface, theme.CARD_BG, ADD_RECT, border_radius=21)
+        pygame.draw.rect(surface, theme.ACCENT, ADD_RECT, 1, border_radius=21)
+        icons.draw_plus(surface, ADD_RECT.centerx, ADD_RECT.centery, theme.ACCENT)
 
         if not self._tracks:
             msg = theme.render("This playlist is empty", 12, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=LIST_Y + 40))
+            tip = theme.render("Tap + to add songs", 11, theme.DIM)
+            surface.blit(tip, tip.get_rect(centerx=160, y=LIST_Y + 62))
         else:
             self.draw_list_viewport(surface, len(self._tracks))
             if self._drag_idx is not None:
@@ -143,6 +149,9 @@ class PlaylistScreen(ListScreen):
             return None
         if SHUFFLE_RECT.collidepoint(x, y):
             self._play(shuffle=True)
+            return None
+        if ADD_RECT.collidepoint(x, y):
+            self._add_songs()
             return None
         if LIST_Y <= y < NAV_Y and not self._tap.pending:
             di = self._klist.index_at(y - LIST_Y)
@@ -245,6 +254,10 @@ class PlaylistScreen(ListScreen):
         else:
             self.app.mpd.queue_add(paths)
         self.app.request_poll()
+
+    def _add_songs(self) -> None:
+        from musi.player.screens.search import SearchScreen
+        self.app.push(SearchScreen(self.app, add_to=self._name))
 
     def _remove(self, pos: int) -> None:
         self.app.mpd.playlist_remove_at(self._name, pos)

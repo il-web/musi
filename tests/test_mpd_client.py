@@ -242,6 +242,9 @@ class FakePlaylistMPD(FakeMPD):
     def playlistadd(self, name, uri):
         self.lists.setdefault(name, []).append(uri)
 
+    def playlistclear(self, name):
+        self.lists[name] = []
+
     def playlistdelete(self, name, pos):
         del self.lists[name][pos]
 
@@ -351,3 +354,23 @@ def test_play_playlist_clears_loads_and_plays(tmp_path):
     c = _playlist_client(tmp_path)
     c.play_playlist("Mix", start_index=2, shuffle=True)
     assert c._client.calls == [("clear",), ("load", "Mix"), ("random", 1), ("play", 2)]
+
+
+def test_playlist_create_makes_an_empty_playlist(tmp_path):
+    c = _playlist_client(tmp_path)
+    assert c.playlist_create("  Road/trip ") == "Roadtrip"
+    assert c._client.lists["Roadtrip"] == []
+
+
+def test_playlist_create_never_clobbers_an_existing_one(tmp_path):
+    c = _playlist_client(tmp_path)
+    c._client.lists["Mix"] = ["a.mp3"]
+    c._client.lists["mix 2"] = []
+    assert c.playlist_create("Mix") == "Mix 3"
+    assert c._client.lists["Mix"] == ["a.mp3"]
+
+
+def test_playlist_create_rejects_a_blank_name(tmp_path):
+    c = _playlist_client(tmp_path)
+    assert c.playlist_create(" / ") == ""
+    assert c._client.lists == {}

@@ -39,6 +39,7 @@ class _Item:
     sub:      str = ""
     row_id:   int = 0
     art_path: str = ""
+    new:      bool = False          # the "New playlist" row atop Playlists
 
 
 class LibraryScreen(ListScreen):
@@ -79,7 +80,8 @@ class LibraryScreen(ListScreen):
             self._klist.set_count(math.ceil(len(self.items) / COLS), reset=True)
         elif self.pill == 2:
             pls = self.app.mpd.list_playlists()
-            self.items = [_Item(p.name, sub=str(p.track_count)) for p in pls]
+            self.items = [_Item("New playlist", new=True)] + [
+                _Item(p.name, sub=str(p.track_count)) for p in pls]
             self.item_h = self._klist.item_h = ARTIST_H
             self._klist.set_count(len(self.items), reset=True)
         else:
@@ -165,6 +167,12 @@ class LibraryScreen(ListScreen):
         rect = pygame.Rect(MARGIN, y, 320 - MARGIN * 2, ARTIST_H - 3)
         pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
                          rect, border_radius=7)
+        if item.new:
+            col = theme.WHITE if sel else theme.ACCENT
+            icons.draw_plus(surface, rect.x + 22, cy, col)
+            lbl = theme.render_cached(item.label, 13, col, bold=True)
+            surface.blit(lbl, (rect.x + 40, cy - lbl.get_height() // 2))
+            return
         lbl = theme.render_cached(item.label, 13, theme.WHITE, bold=sel,
                                   max_width=214 if item.sub else 250)
         surface.blit(lbl, (rect.x + 12,
@@ -209,6 +217,8 @@ class LibraryScreen(ListScreen):
         if self._grid_mode:
             from musi.player.screens.album import AlbumScreen
             self.app.push(AlbumScreen(self.app, item.row_id))
+        elif self.pill == 2 and item.new:
+            self._new_playlist()
         elif self.pill == 2:
             from musi.player.screens.playlist import PlaylistScreen
             self.app.push(PlaylistScreen(self.app, item.label))
@@ -225,6 +235,8 @@ class LibraryScreen(ListScreen):
         di = self._klist.index_at(y - self.list_y)
         if not (0 <= di < len(self.items)):
             return False
+        if self.items[di].new:
+            return False
         self._sel = di
         name = self.items[di].label
         from musi.player.screens.context_menu import ContextMenuScreen
@@ -234,6 +246,22 @@ class LibraryScreen(ListScreen):
             ("Delete",  lambda: self._confirm_delete(name)),
         ]))
         return True
+
+    def _new_playlist(self) -> None:
+        from musi.player.screens.text_entry import TextEntryScreen
+        self.app.push(TextEntryScreen(self.app, "New playlist",
+                                      on_commit=self._create_playlist))
+
+    def _create_playlist(self, text: str) -> None:
+        """Make it, open it, and go straight to picking songs for it."""
+        name = self.app.mpd.playlist_create(text)
+        if not name:
+            return
+        self._load()
+        from musi.player.screens.playlist import PlaylistScreen
+        from musi.player.screens.search import SearchScreen
+        self.app.push(PlaylistScreen(self.app, name))
+        self.app.push(SearchScreen(self.app, add_to=name))
 
     def _play_playlist(self, name: str) -> None:
         self.app.mpd.play_playlist(name)

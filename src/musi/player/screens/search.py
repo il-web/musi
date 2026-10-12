@@ -1,4 +1,9 @@
-"""Search screen — full-text search across the music library."""
+"""Search screen — full-text search across the music library.
+
+With ``add_to=<playlist>`` it is the "Add songs" picker for that playlist:
+tapping a result adds it (and ticks it) instead of playing, and the keyboard's
+OK key (or the Done strip below it) finishes.
+"""
 from __future__ import annotations
 
 import time
@@ -8,9 +13,9 @@ from pathlib import Path
 import pygame
 
 from musi.library import remote
-from musi.player import audio_detect, icons, statusbar, theme
+from musi.player import audio_detect, dock, icons, statusbar, theme
 from musi.player.input import Button
-from musi.player.keyboard import Keyboard
+from musi.player.keyboard import HEIGHT as KB_HEIGHT, Keyboard
 from musi.player.mpd_client import FAVORITES, PlayerStatus
 from musi.player.list_screen import ListScreen
 from musi.player.widgets import draw_scrollbar
@@ -19,7 +24,7 @@ from musi.player.widgets import draw_scrollbar
 BAR_H   = 26          # status bar height (matches statusbar.BAR_H)
 BOX_H   = 36          # search box height
 ITEM_H  = 54          # height per result row
-KB_TOP  = 314         # keyboard bottom lands exactly on dock.NAV_Y (450)
+KB_TOP  = dock.NAV_Y - KB_HEIGHT   # 266 — keyboard bottom lands on the nav row
 
 _CURSOR_BLINK = 0.55   # seconds per blink half-cycle
 
@@ -35,7 +40,7 @@ class _Result:
 class SearchScreen(ListScreen):
     animates = True   # cursor blink + keyboard — keep responsive, no sleep
 
-    def __init__(self, app, top_y: int = BAR_H) -> None:
+    def __init__(self, app, top_y: int = BAR_H, add_to: str | None = None) -> None:
         self.box_y  = top_y + 4
         self.list_y = self.box_y + BOX_H + 4
         super().__init__(app, item_h=ITEM_H, list_y=self.list_y, nav_y=KB_TOP)
@@ -44,6 +49,8 @@ class SearchScreen(ListScreen):
         self._results: list[_Result] = []
         self._enter_t: float         = 0.0
         self._kb    = Keyboard(KB_TOP)
+        self._add_to = add_to             # playlist name in "Add songs" mode
+        self._added: set[str] = set()     # paths added during this visit
 
         # static surfaces (lazy)
         self._nav_surf: pygame.Surface | None = None
@@ -80,17 +87,36 @@ class SearchScreen(ListScreen):
     def handle_touch(self, x: int, y: int) -> "Button | None":
         if y < 26:
             return Button.HOME
+        if self._add_to is not None and y >= dock.NAV_Y:   # the Done strip
+            self.app.pop()
+            return None
         if y >= KB_TOP:                       # tap on the on-screen keyboard
             self._on_key(self._kb.key_at(x, y))
             return None
         if self.list_y <= y < KB_TOP and not self._tap.pending:   # tap a result
             di = self._klist.index_at(y - self.list_y)
             if 0 <= di < len(self._results):
-                self._sel = di                # highlight flashes, then plays
-                self._tap.set(self._play_selected)
+                self._sel = di                # highlight flashes, then acts
+                self._tap.set(self._pick_selected)
         return None
 
+    # the keyboard captures its gesture: the key under the finger at lift-off
+    # types, so a press that slides a little still lands
+    def on_press(self, x: int, y: int) -> bool:
+        if not self._kb.contains(x, y):
+            return False
+        self._kb.press(x, y)
+        return True
+
+    def on_drag(self, x: int, y: int) -> None:
+        self._kb.drag(x, y)
+
+    def on_release(self, x: int, y: int) -> None:
+        self._on_key(self._kb.release(x, y))
+
     def handle_long_press(self, x: int, y: int) -> bool:
+        if self._add_to is not None:
+            return False
         if not (self.list_y <= y < KB_TOP):
             return False
         di = self._klist.index_at(y - self.list_y)
@@ -126,7 +152,10 @@ class SearchScreen(ListScreen):
         if key is None:
             return
         if key == "ENTER":
-            self._play_selected()
+            if self._add_to is not None:
+                self.app.pop()                # done adding
+            else:
+                self._play_selected()
             return
         if key == "BACKSPACE":
             self._query = self._query[:-1]
@@ -151,7 +180,7 @@ class SearchScreen(ListScreen):
                 self._sel += 1
                 self._clamp_scroll()
         elif button in (Button.SELECT, Button.PLAY_PAUSE):
-            self._play_selected()
+            self._pick_selected()
         elif button == Button.BACK:
             if self._query:
                 self._query   = ""
@@ -169,7 +198,9 @@ class SearchScreen(ListScreen):
                 "Enter = play   Esc = clear/back", 10, theme.WHITE
             )
         if self._ph_surf is None:
-            self._ph_surf = theme.render("Type to search…", 12, theme.DIM)
+            self._ph_surf = theme.render(
+                f"Find songs for {self._add_to}…" if self._add_to is not None
+                else "Type to search…", 12, theme.DIM, max_width=268)
 
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(), show_home=len(self.app.stack) > 1)
@@ -198,7 +229,9 @@ class SearchScreen(ListScreen):
             msg = theme.render("No results", 13, theme.DIM)
             surface.blit(msg, msg.get_rect(centerx=160, y=240))
         elif not self._results:
-            hint = theme.render("Search by title, artist, or album",
+            hint = theme.render("Search, then tap songs to add them"
+                                if self._add_to is not None else
+                                "Search by title, artist, or album",
                                 11, theme.DIM, max_width=290)
             surface.blit(hint, hint.get_rect(centerx=160, y=240))
         else:
@@ -213,6 +246,19 @@ class SearchScreen(ListScreen):
 
         # ── on-screen keyboard ─────────────────────────────────────────────────
         self._kb.draw(surface)
+
+        if self._add_to is not None:          # no dock here: count + Done
+            cy = (dock.NAV_Y + 480) // 2
+            n = len(self._added)
+            msg = (f"{n} song{'s' if n != 1 else ''} added" if n
+                   else "Tap a song to add it")
+            s = theme.render(msg, 11, theme.WHITE if n else theme.DIM,
+                             max_width=220)
+            surface.blit(s, s.get_rect(x=14, centery=cy))
+            done = pygame.Rect(244, cy - 11, 66, 22)
+            pygame.draw.rect(surface, theme.ACCENT, done, border_radius=11)
+            d = theme.render("Done", 11, theme.WHITE, bold=True)
+            surface.blit(d, d.get_rect(center=done.center))
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
         res  = self._results[di]
@@ -247,9 +293,17 @@ class SearchScreen(ListScreen):
                                   max_width=278)
             surface.blit(meta_s, (16, y + 29))
 
-        # small play triangle on the right when selected
-        if sel:
-            icons.draw_play(surface, 302, y + (ITEM_H - 3) // 2, theme.WHITE)
+        cy = y + (ITEM_H - 3) // 2
+        if self._add_to is not None:          # + to add, ✓ once added
+            col = theme.WHITE if sel else theme.ACCENT
+            if res.path in self._added:
+                pygame.draw.lines(surface, col, False,
+                                  [(295, cy), (299, cy + 5), (307, cy - 5)], 2)
+            else:
+                pygame.draw.line(surface, col, (295, cy), (307, cy), 2)
+                pygame.draw.line(surface, col, (301, cy - 6), (301, cy + 6), 2)
+        elif sel:                             # small play triangle when selected
+            icons.draw_play(surface, 302, cy, theme.WHITE)
 
     # ── search logic ─────────────────────────────────────────────────────────
 
@@ -293,7 +347,18 @@ class SearchScreen(ListScreen):
         ]
         self._klist.set_count(len(self._results), reset=True)
 
-    # ── playback ─────────────────────────────────────────────────────────────
+    # ── playback / adding ────────────────────────────────────────────────────
+
+    def _pick_selected(self) -> None:
+        if self._add_to is None:
+            self._play_selected()
+            return
+        if not self._results:
+            return
+        path = self._results[self._sel].path
+        if path not in self._added:           # a second tap doesn't duplicate
+            self.app.mpd.playlist_add(self._add_to, [path])
+            self._added.add(path)
 
     def _play_selected(self) -> None:
         if not self._results:

@@ -56,7 +56,7 @@ class AddToPlaylistScreen(ListScreen):
         is_new = (di == 0)
         label  = "New playlist" if is_new else name
         if is_new:
-            _draw_plus(surface, 30, y + (ITEM_H - 4) // 2,
+            icons.draw_plus(surface, 30, y + (ITEM_H - 4) // 2,
                        theme.WHITE if sel else theme.ACCENT)
         elif name == "Favorites":
             icons.draw_heart(surface, 30, y + (ITEM_H - 4) // 2,
@@ -107,7 +107,3 @@ class AddToPlaylistScreen(ListScreen):
         self.app.mpd.playlist_add(name, self._paths)
         self.app.pop()          # leave the picker too — back to the origin screen
 
-
-def _draw_plus(surface, cx, cy, col) -> None:
-    pygame.draw.line(surface, col, (cx - 7, cy), (cx + 7, cy), 2)
-    pygame.draw.line(surface, col, (cx, cy - 7), (cx, cy + 7), 2)

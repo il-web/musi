@@ -133,3 +133,37 @@ def test_a_non_move_drag_does_not_call_mpd():
     s.on_press(pl.HANDLE_X, s.list_y + 4)
     s.on_release(pl.HANDLE_X, s.list_y + 4)
     assert not any(c[0] == "playlist_move" for c in app.mpd.calls)
+
+
+def test_add_button_opens_the_song_picker_for_this_playlist():
+    app = FakeApp(FakeMPD([]))
+    s = PlaylistScreen(app, "Gym")
+    app.stack.append(s)
+    s.on_enter()
+    s.draw(pygame.Surface((320, 480)), _status())       # empty-state tip
+    s.handle_touch(*pl.ADD_RECT.center)
+    top = app.stack[-1]
+    assert type(top).__name__ == "SearchScreen"
+    assert top._add_to == "Gym"
+
+
+def test_song_picker_adds_instead_of_playing_and_ok_finishes():
+    from musi.player.screens.search import SearchScreen, _Result
+    mpd = FakeMPD([])
+    added = []
+    mpd.playlist_add = lambda name, paths: added.append((name, list(paths)))
+    app = FakeApp(mpd)
+    s = SearchScreen(app, add_to="Gym")
+    app.stack.append(s)
+    s._results = [_Result("Song", "Artist", "Album", "/m/song.mp3")]
+    s._sel = 0
+    s._pick_selected()
+    s._pick_selected()                         # a second tap doesn't duplicate
+    assert added == [("Gym", ["/m/song.mp3"])]
+    assert ("play_paths",) not in [c[:1] for c in mpd.calls]
+    s.draw(pygame.Surface((320, 480)), _status())
+    s._on_key("ENTER")
+    assert app.stack == []
+    app.stack.append(s)
+    s.handle_touch(280, 465)                   # the Done strip
+    assert app.stack == []

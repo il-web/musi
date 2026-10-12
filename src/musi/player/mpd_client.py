@@ -468,6 +468,32 @@ class MusiMPDClient:
             self._connected = False
 
     @_synchronized
+    def playlist_create(self, name: str) -> str:
+        """Create an empty stored playlist; return its final name ('' on failure).
+
+        A name already taken gets a number ("Road trip 2") — never touch an
+        existing playlist. ``playlistclear`` on a missing name writes an empty
+        playlist file, which is how MPD creates one with no songs yet.
+        """
+        if not self._ensure():
+            return ""
+        base = _safe_playlist_name(name)
+        if not base:
+            return ""
+        try:
+            taken = {p.get("playlist", "").casefold()
+                     for p in self._client.listplaylists()}
+            final, n = base, 2
+            while final.casefold() in taken:
+                final = _safe_playlist_name(f"{base[:_NAME_MAX - 4]} {n}")
+                n += 1
+            self._client.playlistclear(final)
+            return final
+        except Exception:
+            self._connected = False
+            return ""
+
+    @_synchronized
     def playlist_remove_at(self, name: str, pos: int) -> None:
         self._cmd(lambda: self._client.playlistdelete(name, pos))
 

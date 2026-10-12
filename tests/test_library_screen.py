@@ -46,6 +46,10 @@ class FakeMPD:
     def playlist_delete(self, name):
         self.calls.append(("playlist_delete", name))
 
+    def playlist_create(self, name):
+        self.calls.append(("playlist_create", name))
+        return name
+
 
 class FakeApp:
     def __init__(self, db, mpd=None):
@@ -132,8 +136,9 @@ def test_playlists_pill_loads_rows_from_mpd(db):
     s = LibraryScreen(app)
     s.on_enter()
     s.set_pill(2)
-    assert [i.label for i in s.items] == ["Favorites", "Road trip"]
-    assert [i.sub for i in s.items] == ["3", "12"]
+    assert [i.label for i in s.items] == ["New playlist", "Favorites", "Road trip"]
+    assert [i.sub for i in s.items] == ["", "3", "12"]
+    assert s.items[0].new and not s.items[1].new
     assert s.item_h == library.ARTIST_H
 
 
@@ -142,7 +147,7 @@ def test_selecting_a_playlist_pushes_the_playlist_screen(db):
     s = LibraryScreen(app)
     s.on_enter()
     s.set_pill(2)
-    s._sel = 0
+    s._sel = 1
     s._select()
     assert type(app.stack[-1]).__name__ == "PlaylistScreen"
     assert app.stack[-1]._name == "Road trip"
@@ -154,9 +159,38 @@ def test_long_press_on_a_playlist_opens_the_manage_menu(db):
     s.on_enter()
     s.set_pill(2)
     s.draw(pygame.Surface((320, 480)), FakeStatus())
-    handled = s.handle_long_press(60, s.list_y + 4)
+    handled = s.handle_long_press(60, s.list_y + library.ARTIST_H + 4)
     assert handled is True
     assert type(app.stack[-1]).__name__ == "ContextMenuScreen"
+
+
+def test_long_press_on_new_playlist_row_is_ignored(db):
+    app = FakeApp(db, FakeMPD(playlists=[("Road trip", 12)]))
+    s = LibraryScreen(app)
+    s.on_enter()
+    s.set_pill(2)
+    assert s.handle_long_press(60, s.list_y + 4) is False
+    assert app.stack == []
+
+
+def test_new_playlist_asks_a_name_then_opens_it_to_add_songs(db):
+    app = FakeApp(db, FakeMPD(playlists=[("Road trip", 12)]))
+    s = LibraryScreen(app)
+    s.on_enter()
+    s.set_pill(2)
+    s.draw(pygame.Surface((320, 480)), FakeStatus())     # draws the + row
+    s._sel = 0
+    s._select()
+    entry = app.stack[-1]
+    assert type(entry).__name__ == "TextEntryScreen"
+    for ch in "Gym":
+        entry._on_key(ch)
+    entry._on_key("ENTER")
+    assert ("playlist_create", "Gym") in app.mpd.calls
+    names = [type(x).__name__ for x in app.stack]
+    assert names == ["PlaylistScreen", "SearchScreen"]
+    assert app.stack[0]._name == "Gym"
+    assert app.stack[1]._add_to == "Gym"
 
 
 def test_long_press_does_nothing_on_the_albums_pill(db):

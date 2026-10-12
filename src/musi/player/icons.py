@@ -150,3 +150,8 @@ def with_airplay(text: pygame.Surface, col: tuple) -> pygame.Surface:
     out.blit(text, (0, 0))
     draw_airplay(out, w + 10, h // 2, col)
     return out
+
+
+def draw_plus(surface: pygame.Surface, cx: int, cy: int, col: tuple) -> None:
+    pygame.draw.line(surface, col, (cx - 7, cy), (cx + 7, cy), 2)
+    pygame.draw.line(surface, col, (cx, cy - 7), (cx, cy + 7), 2)
