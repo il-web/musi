@@ -9,8 +9,9 @@ Wants=mpd.service
 ExecStart=/bin/bash %h/musi/run.sh
 Restart=always
 RestartSec=3
-# Quit the boot splash once the UI process is up (first frame ~imminent).
-ExecStartPost=-/bin/sh -c 'plymouth quit --retain-splash 2>/dev/null || true'
+# The boot splash is quit by the app itself, right before it opens the
+# display (player/splash.py) — quitting it here left the console showing
+# while Python started up.
 
 [Install]
 WantedBy=default.target

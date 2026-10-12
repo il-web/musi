@@ -33,7 +33,7 @@ STATE="$STATE_DIR/update-level"
 # Root-owned copy of this script — the only thing sudoers will run as root.
 ROOT_SCRIPT="/usr/local/lib/musi/update-root.sh"
 
-LATEST_STEP=11
+LATEST_STEP=12
 
 say() { printf '[update] %s\n' "$*"; }
 
@@ -332,6 +332,86 @@ user_11() {
     if command -v shairport-sync > /dev/null; then
         systemctl --user restart musi-airplay 2>/dev/null || true
     fi
+}
+
+# ── step 12: boot look — sound rings, no console (2026-10-12) ─────────────────
+# Power-on showed a text-only splash that quit as soon as the UI *service*
+# started — then seconds of bare console (and a login prompt) on the panel
+# while Python loaded. Now:
+#   - the "sound rings" splash (pi/plymouth + src/musi/player/assets/boot),
+#     staged root-owned in /usr/local/lib/musi/plymouth by install.sh
+#   - the app quits the splash itself, right before it opens the display
+#     (player/splash.py), via one sudoers rule; the musi-ui unit no longer
+#     quits it early
+#   - plymouth-quit at the end of boot waits (up to 30 s) for the app to do
+#     that, then quits keeping the last frame — never a console flash
+#   - kernel and boot messages off the panel (quiet, loglevel=3, console on
+#     tty3), no cursor, no boot logo, no getty on tty1. SSH is unaffected.
+user_12() {
+    install -m 0644 "$REPO/pi/musi-ui.service" "$HOME/.config/systemd/user/musi-ui.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    say "new boot look — takes effect at the next reboot"
+}
+
+root_12() {
+    # Optional args, for tests: a root dir, a systemctl stand-in, the theme
+    # source dir and a sudoers checker. Real runs take the defaults.
+    root="${1:-}"
+    sysctl="${2:-systemctl}"
+    src="${3:-$REPO/plymouth}"
+    visudo="${4:-visudo}"
+
+    theme="$root/usr/share/plymouth/themes/musi"
+    if [ -f "$src/musi.script" ]; then
+        mkdir -p "$theme"
+        rm -f "$theme"/*
+        cp "$src"/* "$theme"/
+        if [ -z "$root" ]; then
+            plymouth-set-default-theme musi 2>/dev/null || true
+            update-initramfs -u > /dev/null 2>&1 || true
+        fi
+    fi
+
+    boot="$root/boot/firmware"
+    [ -d "$boot" ] || boot="$root/boot"
+    cmdline="$boot/cmdline.txt"
+    if [ -f "$cmdline" ]; then
+        # one line: edit in place, never add a line
+        sed -i -e '1s/console=tty1\([[:space:]]\|$\)/console=tty3\1/' "$cmdline"
+        for tok in quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0 \
+                   plymouth.ignore-serial-consoles; do
+            if ! head -n 1 "$cmdline" | tr ' ' '\n' | grep -qxF "$tok"; then
+                sed -i -e '1s/[[:space:]]*$//' -e "1s/\$/ $tok/" "$cmdline"
+            fi
+        done
+    fi
+
+    "$sysctl" mask getty@tty1.service 2>/dev/null || true
+
+    dropin="$root/etc/systemd/system/plymouth-quit.service.d"
+    mkdir -p "$dropin"
+    cat > "$dropin/musi.conf" <<'EOF'
+# musi: the app quits the splash itself (player/splash.py). Wait for that,
+# and only then fall back — keeping the last frame, never showing a console.
+# ($$ is systemd's escape for a literal $.)
+[Service]
+ExecStart=
+ExecStart=/bin/sh -c 'i=0; while [ $$i -lt 60 ] && /usr/bin/plymouth --ping; do sleep 0.5; i=$$((i+1)); done; /usr/bin/plymouth quit --retain-splash || true'
+EOF
+
+    owner="${SUDO_USER:-musi}"
+    rule="$root/etc/sudoers.d/musi-splash"
+    mkdir -p "$root/etc/sudoers.d"
+    tmp="$(mktemp)"
+    printf '%s ALL=(root) NOPASSWD: /usr/bin/plymouth quit --retain-splash\n' "$owner" > "$tmp"
+    if "$visudo" -c -f "$tmp" > /dev/null 2>&1; then
+        install -m 0440 "$tmp" "$rule"
+        [ -n "$root" ] || chown root:root "$rule"
+    fi
+    rm -f "$tmp"
+
+    "$sysctl" daemon-reload 2>/dev/null || true
+    return 0
 }
 
 # ══ mechanics ══════════════════════════════════════════════════════════════════

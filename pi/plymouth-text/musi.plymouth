@@ -1,8 +1,0 @@
-[Plymouth Theme]
-Name=musi
-Description=musi boot splash — text only
-ModuleName=script
-
-[script]
-ImageDir=/usr/share/plymouth/themes/musi
-ScriptFile=/usr/share/plymouth/themes/musi/musi.script

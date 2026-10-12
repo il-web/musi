@@ -33,7 +33,7 @@ musi-library = "musi.library.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"musi.player" = ["assets/wallpapers/*.jpg"]
+"musi.player" = ["assets/wallpapers/*.jpg", "assets/boot/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

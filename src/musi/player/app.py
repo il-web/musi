@@ -279,6 +279,8 @@ class App:
     # ── main loop ─────────────────────────────────────────────────────────────
 
     def run(self, initial_screen: Screen) -> None:
+        from musi.player import splash
+        splash.release()        # the boot splash lets go of the panel only now
         pygame.init()
         pygame.display.set_caption("musi")
 

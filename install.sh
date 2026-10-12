@@ -274,10 +274,18 @@ RestartSec=3
 WantedBy=default.target
 EOF
 
-# ── 9. boot splash (Plymouth) ─────────────────────────────────────────────────
+# ── 9. boot splash (Plymouth) — mirrors update.sh step 12 ────────────────────
 say "Boot splash"
+# The theme is staged root-owned next to update-root.sh, so update.sh's root
+# step installs it from there and never from the user-writable checkout.
+sudo install -d -m 0755 -o root -g root /usr/local/lib/musi/plymouth
+sudo rm -f /usr/local/lib/musi/plymouth/*
+sudo install -m 0644 -o root -g root "$SCRIPT_DIR"/pi/plymouth/musi.plymouth \
+    "$SCRIPT_DIR"/pi/plymouth/musi.script \
+    "$SCRIPT_DIR"/src/musi/player/assets/boot/*.png /usr/local/lib/musi/plymouth/
 sudo mkdir -p /usr/share/plymouth/themes/musi
-sudo cp "$SCRIPT_DIR"/pi/plymouth-text/* /usr/share/plymouth/themes/musi/
+sudo rm -f /usr/share/plymouth/themes/musi/*
+sudo cp /usr/local/lib/musi/plymouth/* /usr/share/plymouth/themes/musi/
 sudo cp "$SCRIPT_DIR/pi/initramfs-hook-panel" /etc/initramfs-tools/hooks/panel-firmware
 sudo sed -i 's/\r$//' /etc/initramfs-tools/hooks/panel-firmware
 sudo chmod +x /etc/initramfs-tools/hooks/panel-firmware
@@ -287,8 +295,35 @@ grep -q '^panel-mipi-dbi' /etc/initramfs-tools/modules 2>/dev/null || \
 sudo sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf 2>/dev/null || true
 sudo plymouth-set-default-theme musi 2>/dev/null || true
 sudo update-initramfs -u 2>/dev/null || true
-echo "  NOTE: add 'quiet splash plymouth.ignore-serial-consoles fbcon=map:10' to"
-echo "        /boot/firmware/cmdline.txt (one line) for the splash at boot."
+
+# No console on the panel, ever: boot messages to tty3 and quiet, no cursor,
+# no boot logo, no login prompt on tty1 (SSH is unaffected). cmdline.txt is
+# ONE line: edit in place.
+SPLASH_CMDLINE=/boot/firmware/cmdline.txt
+[ -f "$SPLASH_CMDLINE" ] || SPLASH_CMDLINE=/boot/cmdline.txt
+if [ -f "$SPLASH_CMDLINE" ]; then
+    sudo sed -i -e '1s/console=tty1\([[:space:]]\|$\)/console=tty3\1/' "$SPLASH_CMDLINE"
+    for tok in quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0 \
+               plymouth.ignore-serial-consoles; do
+        if ! head -n 1 "$SPLASH_CMDLINE" | tr ' ' '\n' | grep -qxF "$tok"; then
+            sudo sed -i -e '1s/[[:space:]]*$//' -e "1s/\$/ $tok/" "$SPLASH_CMDLINE"
+        fi
+    done
+fi
+sudo systemctl mask getty@tty1.service 2>/dev/null || true
+# The app quits the splash right before it opens the display; at the end of
+# boot, plymouth-quit only falls back to that after 30 s, keeping the frame.
+sudo mkdir -p /etc/systemd/system/plymouth-quit.service.d
+sudo tee /etc/systemd/system/plymouth-quit.service.d/musi.conf > /dev/null <<'EOF'
+# musi: the app quits the splash itself (player/splash.py). Wait for that,
+# and only then fall back — keeping the last frame, never showing a console.
+# ($$ is systemd's escape for a literal $.)
+[Service]
+ExecStart=
+ExecStart=/bin/sh -c 'i=0; while [ $$i -lt 60 ] && /usr/bin/plymouth --ping; do sleep 0.5; i=$$((i+1)); done; /usr/bin/plymouth quit --retain-splash || true'
+EOF
+sudo systemctl daemon-reload
+echo "  NOTE: cmdline.txt must also carry 'fbcon=map:10' (see README §3)."
 echo "  IMPORTANT: 'fbcon=map:10' is NOT just cosmetic. It maps the console onto"
 echo "        the SPI panel, which is what enables the DRM pipeline at boot. On a"
 echo "        clean Raspberry Pi OS install with nothing else driving the panel,"
@@ -340,6 +375,7 @@ printf '%s ALL=(root) NOPASSWD: %s\n' "$USER_NAME" \
 /usr/sbin/iw dev wlan0 set power_save off, \
 /usr/bin/raspi-config nonint do_overlayfs 0, \
 /usr/bin/raspi-config nonint do_overlayfs 1, \
+/usr/bin/plymouth quit --retain-splash, \
 /bin/bash /usr/local/lib/musi/update-root.sh --root *" > "$TMP_SUDOERS"
 if sudo visudo -c -f "$TMP_SUDOERS" > /dev/null; then
     sudo install -m 0440 -o root -g root "$TMP_SUDOERS" /etc/sudoers.d/musi-power
