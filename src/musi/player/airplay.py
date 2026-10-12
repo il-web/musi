@@ -19,7 +19,8 @@ Metadata items look like
   <data encoding="base64">SGVsbG8=</data></item>
 type/code are 4 ASCII chars in hex: core/minm = title, core/asar = artist,
 core/asal = album, ssnc/PICT = cover, ssnc/prgr = "start/now/end" in RTP
-frames (44.1 kHz), ssnc/pfls / ssnc/prsm = paused / resumed.
+frames (44.1 kHz). Paused: ssnc/paus (AirPlay 2) or ssnc/pfls (a flush, both);
+resumed: ssnc/pres (AirPlay 2) or ssnc/prsm / ssnc/pbeg (AirPlay 1).
 """
 from __future__ import annotations
 
@@ -95,9 +96,13 @@ def _apply(kind: str, code: str, data: bytes) -> None:
                 except ValueError:
                     return
                 _meta.update(start=start, now=now, end=end, at=time.monotonic())
-            elif code == "pfls":
+            # AirPlay 2 (iPhones today) says paus / pres; AirPlay 1 only
+            # flushes on pause and says prsm on resume. A pause flushes in
+            # both, so a resume must be heard in both dialects too — pres
+            # was missed, and musi stayed on "paused" with music playing.
+            elif code in ("pfls", "paus"):
                 _set_paused(True)
-            elif code in ("prsm", "pbeg"):
+            elif code in ("prsm", "pbeg", "pres"):
                 _set_paused(False)
             elif code == "snam":
                 _meta["source"] = data.decode("utf-8", "replace")

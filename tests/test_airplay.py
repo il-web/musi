@@ -85,6 +85,19 @@ def test_progress_is_extrapolated_while_playing_and_frozen_when_paused(monkeypat
     assert airplay.position()[0] == pytest.approx(15)
 
 
+@pytest.mark.parametrize("pause, resume", [
+    (["pfls", "paus"], "pres"),        # AirPlay 2 (an iPhone): flush + paus, then pres
+    (["pfls"], "prsm"),                # AirPlay 1
+])
+def test_pause_then_resume_on_the_phone_shows_playing_again(pause, resume):
+    airplay.feed(item("ssnc", "pres"))
+    for code in pause:
+        airplay.feed(item("ssnc", code))
+    assert airplay.overlay(PlayerStatus.disconnected()).state == "pause"
+    airplay.feed(item("ssnc", resume))
+    assert airplay.overlay(PlayerStatus.disconnected()).state == "play"
+
+
 def test_overlay_shows_the_phones_song_on_the_player():
     airplay.feed(item("core", "minm", b"Houdini") + item("core", "asar", b"Dua Lipa"))
     st = airplay.overlay(PlayerStatus.disconnected())
