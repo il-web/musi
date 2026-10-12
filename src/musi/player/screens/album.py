@@ -152,8 +152,9 @@ class AlbumScreen(ListScreen):
 
         # ── buttons ───────────────────────────────────────────────────────────
         pygame.draw.rect(surface, self._accent, PLAY_RECT, border_radius=21)
-        icons.draw_play(surface, PLAY_RECT.x + 62, PLAY_RECT.centery, theme.WHITE)
-        play_s = theme.render("Play", 13, theme.WHITE, bold=True)
+        on = theme.text_on(self._accent)
+        icons.draw_play(surface, PLAY_RECT.x + 62, PLAY_RECT.centery, on)
+        play_s = theme.render("Play", 13, on, bold=True)
         surface.blit(play_s, play_s.get_rect(x=PLAY_RECT.x + 78,
                                              centery=PLAY_RECT.centery))
 

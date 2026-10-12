@@ -5,7 +5,7 @@ BELOW the art, never over it: 9px text over arbitrary album art is unreadable
 on light sleeves, and a caption band across twelve covers is clutter.
 
 Artists render as ROWS, not a grid — the artists table is id + name, with no
-art to show. PILLS is a list so playlists become one entry later.
+art to show. Tapping one opens their artist page (screens/artist.py).
 """
 from __future__ import annotations
 
@@ -49,15 +49,13 @@ class LibraryScreen(ListScreen):
         self.pill = 0
         self.items: list[_Item] = []
         self._pill_rects: list[pygame.Rect] = []
-        self.artist_id   = 0        # non-zero while drilled into one artist
-        self.artist_name = ""
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     @property
     def _grid_mode(self) -> bool:
-        """Albums render as a grid: the Albums pill, or inside an artist."""
-        return self.pill == 0 or bool(self.artist_id)
+        """Albums render as a grid (the Albums pill)."""
+        return self.pill == 0
 
     def on_enter(self) -> None:
         self._load()
@@ -67,7 +65,6 @@ class LibraryScreen(ListScreen):
             return
         self.pill = i
         self._sel = 0
-        self.artist_id, self.artist_name = 0, ""
         self._load()
 
     def _load(self) -> None:
@@ -101,16 +98,9 @@ class LibraryScreen(ListScreen):
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_home=len(self.app.stack) > 1)
 
-        if self.artist_id:
-            icons.draw_chevron_left(surface, 18, TITLE_Y + 10, theme.ACCENT)
-            surface.blit(theme.render(self.artist_name, 18, theme.WHITE,
-                                      bold=True, max_width=264),
-                         (34, TITLE_Y))
-            self._pill_rects = []       # no pills while drilled in
-        else:
-            surface.blit(theme.render("Library", 20, theme.WHITE, bold=True),
-                         (MARGIN, TITLE_Y))
-            self._draw_pills(surface)
+        surface.blit(theme.render("Library", 20, theme.WHITE, bold=True),
+                     (MARGIN, TITLE_Y))
+        self._draw_pills(surface)
 
         rows = (math.ceil(len(self.items) / COLS) if self._grid_mode
                 else len(self.items))
@@ -187,10 +177,6 @@ class LibraryScreen(ListScreen):
     # ── input ─────────────────────────────────────────────────────────────────
 
     def handle_touch(self, x: int, y: int):
-        if self.artist_id and y < PILL_Y and x < 120:
-            self.go_up()
-            return None
-
         for i, rect in enumerate(self._pill_rects):
             if rect.collidepoint(x, y):
                 self.set_pill(i)
@@ -223,12 +209,13 @@ class LibraryScreen(ListScreen):
             from musi.player.screens.playlist import PlaylistScreen
             self.app.push(PlaylistScreen(self.app, item.label))
         else:
-            self._drill_into_artist(item.row_id, item.label)
+            from musi.player.screens.artist import ArtistScreen
+            self.app.push(ArtistScreen(self.app, item.row_id))
 
     # ── playlist management (long-press on the Playlists pill) ────────────────
 
     def handle_long_press(self, x: int, y: int) -> bool:
-        if self.pill != 2 or self.artist_id:
+        if self.pill != 2:
             return False
         if not (self.list_y <= y < self.nav_y):
             return False
@@ -282,29 +269,3 @@ class LibraryScreen(ListScreen):
             ("Delete", lambda: (self.app.mpd.playlist_delete(name), self._load())),
             ("Cancel", lambda: None),
         ]))
-
-    # ── artist drill-in (a level inside Library, not a new screen) ─────────────
-
-    def _drill_into_artist(self, artist_id: int, name: str) -> None:
-        """Show one artist's albums as the grid, with a back crumb.
-
-        This is a level within Library rather than a pushed screen: the nav row
-        stays, and the grid drawing is already here. It replaces the old
-        Artists-then-Albums drill-in that the retired tab-strip screen carried.
-        """
-        self.artist_id   = artist_id
-        self.artist_name = name
-        self._sel = 0
-        rows = album_queries.albums_by_artist(self.app.db, artist_id)
-        self.items = [_Item(r["title"], str(r["year"] or ""), r["id"],
-                            r["art_path"] or "") for r in rows]
-        self.item_h = self._klist.item_h = ROW_H
-        self._klist.set_count(math.ceil(len(self.items) / COLS), reset=True)
-
-    def go_up(self) -> None:
-        """Leave the artist's albums for the artist list."""
-        if self.artist_id:
-            self.artist_id = 0
-            self.artist_name = ""
-            self._sel = 0
-            self._load()

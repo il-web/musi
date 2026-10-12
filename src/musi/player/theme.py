@@ -27,6 +27,13 @@ def brighten(colour: tuple, factor: float = 1.4) -> tuple[int, int, int]:
     return tuple(min(255, int(c * factor)) for c in colour)
 
 
+def text_on(colour: tuple) -> tuple[int, int, int]:
+    """White or near-black — whichever reads on ``colour`` (a button filled
+    with an album's own colour can be pale)."""
+    r, g, b = colour[:3]
+    return (16, 16, 22) if 0.299 * r + 0.587 * g + 0.114 * b > 165 else WHITE
+
+
 def darken(colour: tuple, factor: float = 0.6) -> tuple[int, int, int]:
     return tuple(int(c * factor) for c in colour)
 

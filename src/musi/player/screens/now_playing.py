@@ -68,6 +68,8 @@ class NowPlayingScreen(Screen):
         # cached text surfaces — only re-render when content changes
         self._title_surf:  pygame.Surface | None = None
         self._meta_surf:   pygame.Surface | None = None
+        self._meta_names: tuple[str, str] = ("", "")   # (artist, album) shown
+        self._meta_split: int = 10_000     # x where the album part starts
         self._time_surf:   pygame.Surface | None = None
         self._state_cache: str = ""
         self._shuffle_cache: bool | None = None
@@ -271,8 +273,35 @@ class NowPlayingScreen(Screen):
             else:
                 self._open_queue()
             return None
+        # artist · album line: open the artist's page or the album
+        if ARTIST_Y - 6 <= y <= ARTIST_Y + 22 and self._meta_surf is not None:
+            left = 160 - self._meta_surf.get_width() // 2
+            if left - 12 <= x <= left + self._meta_surf.get_width() + 12:
+                self._open_from_meta(album=(x - left) > self._meta_split)
+            return None
         # (the album art is a captured gesture — tap = play/pause, see on_release)
         return None
+
+    def _open_from_meta(self, *, album: bool) -> None:
+        """The artist page or the album of what's playing — when it's in the
+        library (by its path, else by name: a SUB/WAVE or AirPlay song can
+        still be one of yours). Radio stations and unknown songs: nothing."""
+        db = self.app.db
+        if db is None:
+            return
+        from musi.player import album_queries
+        status = self.app.status
+        artist, album_name = self._meta_names
+        ids = album_queries.ids_for_track(db, status.path, artist, album_name)
+        if album:
+            if ids:
+                from musi.player.screens.album import AlbumScreen
+                self.app.push(AlbumScreen(self.app, ids[0]))
+            return
+        artist_id = ids[1] if ids else album_queries.artist_id_by_name(db, artist)
+        if artist_id:
+            from musi.player.screens.artist import ArtistScreen
+            self.app.push(ArtistScreen(self.app, artist_id))
 
     # ── volume slider + seek bar (drag gestures) ────────────────────────────────
 
@@ -546,9 +575,13 @@ class NowPlayingScreen(Screen):
             elif kind == "airplay":
                 self._title_surf = icons.with_airplay(self._title_surf, theme.WHITE)
 
+        self._meta_names = (artist, album)       # what a tap on the line opens
         if meta != self._prev_meta:
             self._prev_meta  = meta
             self._meta_surf  = theme.render(meta, 13, theme.WHITE, max_width=296)
+            # where "artist" ends on the line: a tap left of the dot = artist
+            self._meta_split = (theme.render(artist + "  ", 13, theme.WHITE).get_width()
+                                if album else 10_000)
 
         elapsed = getattr(status, "elapsed", status.progress * status.duration)
         elapsed_s = int(elapsed)

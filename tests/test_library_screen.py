@@ -111,15 +111,6 @@ def db_multi(tmp_path):
     return conn
 
 
-def _drill_into_prolific(db_multi):
-    s = LibraryScreen(FakeApp(db_multi))
-    s.on_enter()
-    s.set_pill(1)
-    s._sel = 0
-    s._select()          # drill into the artist (inside Library, no push)
-    return s
-
-
 def test_grid_geometry_fills_the_width():
     assert library.COLS == 3
     assert library.CELL == 93
@@ -250,75 +241,6 @@ def test_empty_library_draws_without_crashing(tmp_path):
     assert s.items == []
 
 
-def test_tapping_an_artist_drills_into_their_albums(db):
-    """Artists drill in inside Library — no new screen is pushed."""
-    app = FakeApp(db)
-    s = LibraryScreen(app)
-    s.on_enter()
-    s.set_pill(1)
-    s._sel = 0
-    s._select()
-    assert app.stack == [], "the drill-in must not push a screen"
-    assert s.artist_name == "Alpha"
-    assert [i.label for i in s.items] == ["Album 0"]
-
-
-def test_go_up_returns_to_the_artist_list(db):
-    s = LibraryScreen(FakeApp(db))
-    s.on_enter()
-    s.set_pill(1)
-    s._sel = 0
-    s._select()
-    s.go_up()
-    assert s.artist_id == 0
-    assert [i.label for i in s.items] == ["Alpha", "Beta"]
-
-
-# ── artist drill-in renders and behaves as an album grid ─────────────────────
-
-def test_drilled_in_artist_is_in_grid_mode_and_draws(db_multi):
-    """Symptom 1: the drill-in must render as the grid, not artist cards."""
-    s = _drill_into_prolific(db_multi)
-    assert [i.label for i in s.items] == ["Rec 0", "Rec 1", "Rec 2", "Rec 3"]
-    assert s._grid_mode is True
-    # draws without crashing and stays in grid mode
-    s.draw(pygame.Surface((320, 480)), FakeStatus())
-    assert s._grid_mode is True
-
-
-def test_drilled_in_draw_lays_out_grid_rows_not_item_rows(db_multi):
-    """Symptom 2: draw must pass the same row count set_count received,
-
-    else rows past the second land below the clip and cannot be scrolled to.
-    """
-    s = _drill_into_prolific(db_multi)
-    assert s._klist.count == math.ceil(len(s.items) / library.COLS) == 2
-
-    captured = []
-    real = s.draw_list_viewport
-    s.draw_list_viewport = lambda surface, n: (captured.append(n),
-                                               real(surface, n))[1]
-    s.draw(pygame.Surface((320, 480)), FakeStatus())
-    assert captured == [s._klist.count]
-
-
-def test_drilled_in_select_opens_the_album(db_multi):
-    """Symptom 3: selecting an album in the drill-in must push AlbumScreen."""
-    s = _drill_into_prolific(db_multi)
-    s._sel = 2                     # "Rec 2" — a row past the first grid row
-    s._select()
-    assert len(s.app.stack) == 1
-    assert type(s.app.stack[-1]).__name__ == "AlbumScreen"
-
-
-def test_go_up_after_drill_returns_to_artist_pill(db_multi):
-    s = _drill_into_prolific(db_multi)
-    s.go_up()
-    assert s.pill == 1
-    assert s._grid_mode is False
-    assert [i.label for i in s.items] == ["Prolific"]
-
-
 # ── handle_touch hit-testing ────────────────────────────────────────────────
 
 @pytest.mark.parametrize("col,expected", [(0, 0), (1, 1), (2, 2)])
@@ -340,18 +262,6 @@ def test_tap_on_a_pill_switches_pills(db):
     assert [i.label for i in s.items] == ["Alpha", "Beta"]
 
 
-def test_tap_on_the_back_crumb_goes_up(db):
-    s = LibraryScreen(FakeApp(db))
-    s.on_enter()
-    s.set_pill(1)
-    s._sel = 0
-    s._select()                                   # drilled into "Alpha"
-    assert s.artist_id != 0
-    s.handle_touch(20, 40)                         # y < PILL_Y, x < 120
-    assert s.artist_id == 0
-    assert [i.label for i in s.items] == ["Alpha", "Beta"]
-
-
 def test_new_playlist_still_opens_the_picker_if_mpd_cannot_create(db):
     mpd = FakeMPD()
     mpd.playlist_create = lambda name: ""
@@ -361,3 +271,15 @@ def test_new_playlist_still_opens_the_picker_if_mpd_cannot_create(db):
     s.set_pill(2)
     s._create_playlist("Gym")
     assert app.stack[-1]._add_to == "Gym"
+
+
+def test_tapping_an_artist_opens_their_artist_page(db):
+    app = FakeApp(db)
+    s = LibraryScreen(app)
+    s.on_enter()
+    s.set_pill(1)
+    s._sel = 0
+    s._select()
+    page = app.stack[-1]
+    assert type(page).__name__ == "ArtistScreen"
+    assert page.artist_id == s.items[0].row_id
