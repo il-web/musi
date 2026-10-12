@@ -94,6 +94,7 @@ def sync(client: Client, conn: sqlite3.Connection, art_dir: Path, *,
         album_id = _album(conn, artist_id, album_title,
                           album.get("year") or song.get("year"))
         q = quality.from_subsonic(song)
+        q["codec"] = q.get("codec") or ""        # '' = asked, server didn't say
         conn.execute(
             """INSERT INTO tracks (album_id, artist_id, path, title,
                                    track_number, disc_number, duration, file_mtime,
@@ -315,14 +316,33 @@ def _lower_priority() -> None:
         pass
 
 
-def auto_due(settings: dict | None, now: float, uptime: float) -> bool:
+def auto_due(settings: dict | None, now: float, uptime: float,
+             backfill: bool = False) -> bool:
     """Is a background sync due? Never during the first minutes after boot;
-    every AUTO_EVERY_S after the last success; failures retry sooner."""
+    every AUTO_EVERY_S after the last success; failures retry sooner.
+    ``backfill``: synced songs are missing data a newer musi stores (e.g.
+    their quality) — sync now instead of waiting out AUTO_EVERY_S."""
     if not settings or settings.get("auto_sync") is False or uptime < AUTO_FIRST_S:
         return False
     since_sync = now - (settings.get("last_sync") or 0)
     since_try = now - (settings.get("last_auto_try") or 0)
-    return since_sync >= AUTO_EVERY_S and since_try >= AUTO_RETRY_S
+    return (since_sync >= AUTO_EVERY_S or backfill) and since_try >= AUTO_RETRY_S
+
+
+def needs_backfill(db_path: Path) -> bool:
+    """Server songs synced before musi stored their quality (codec NULL;
+    a sync writes '' when the server doesn't say)."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+        try:
+            return conn.execute(
+                "SELECT 1 FROM tracks WHERE path LIKE 'http%' AND codec IS NULL LIMIT 1"
+            ).fetchone() is not None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
 
 
 def maybe_auto_sync(db_path: Path, art_dir: Path, uptime: float,
@@ -330,7 +350,8 @@ def maybe_auto_sync(db_path: Path, art_dir: Path, uptime: float,
     """Start a background sync if one is due. Returns True if it started."""
     from musi.library.subsonic import load_settings
     now = time.time() if now is None else now
-    if job.running or not auto_due(load_settings(), now, uptime):
+    if job.running or not auto_due(load_settings(), now, uptime,
+                                   backfill=needs_backfill(db_path)):
         return False
     update_settings(last_auto_try=int(now))
     return job.start(db_path, art_dir)

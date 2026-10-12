@@ -166,3 +166,25 @@ def test_album_page_draws_its_tags():
     s._draw_meta_row(surf, 197)                    # fits: all drawn, centred
     s._badge_surfs = [album_mod._badge("X" * 30, "format")] * 4
     s._draw_meta_row(surf, 197)                    # too wide: tail dropped, no crash
+
+
+def test_server_songs_without_quality_trigger_a_sync_soon(tmp_path):
+    from musi.library import subsonic_sync
+    from musi.library.db import open_db, run_migrations
+    db = tmp_path / "lib.db"
+    conn = open_db(db)
+    run_migrations(conn)
+    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
+    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'B')")
+    conn.execute("INSERT INTO tracks (album_id, artist_id, path, title) "
+                 "VALUES (1, 1, 'http://nd/rest/stream?id=1', 'x')")
+    conn.commit()
+    assert subsonic_sync.needs_backfill(db) is True
+    fresh = {"last_sync": 1000, "last_auto_try": 0}
+    assert subsonic_sync.auto_due(fresh, now=2000, uptime=600) is False       # synced recently
+    assert subsonic_sync.auto_due(fresh, now=2000, uptime=600, backfill=True) is True
+    assert subsonic_sync.auto_due(fresh, now=2000, uptime=30, backfill=True) is False  # boot calm
+    conn.execute("UPDATE tracks SET codec = ''")
+    conn.commit()
+    assert subsonic_sync.needs_backfill(db) is False
+    conn.close()
