@@ -115,6 +115,7 @@ def test_listenbrainz_playlists_become_mixes_from_your_library(db):
     jams = made["weekly-jams"]
     assert [t["path"] for t in jams.tracks] == [f"/m/{i}.flac" for i in range(5)]
     assert "5 of 6 in your library" in jams.subtitle
+    assert jams.missing == [("Not In Library", "Nope")]
     assert not any(u.endswith("/playlist/old") for u in lb.urls)   # newest only
     assert "top-discoveries-of-2025" not in made
 
@@ -151,3 +152,53 @@ def test_song_radio_without_a_server_still_plays_something(db):
     r = mixes.song_radio(db, {"path": "/m/0.flac", "title": "Song 0", "artist": "Dua Lipa"})
     assert len(r.tracks) >= 10 and r.tracks[0]["path"] == "/m/0.flac"
     assert len({t["path"] for t in r.tracks}) == len(r.tracks)   # no repeats
+
+
+def test_listenbrainz_playlist_is_offered_even_with_nothing_in_your_library(db):
+    def lb(url):
+        if "/playlists/createdfor" in url:
+            return {"playlists": [{"playlist": {
+                "identifier": "https://listenbrainz.org/playlist/x",
+                "title": "Weekly Exploration",
+                "extension": {"https://musicbrainz.org/doc/jspf#playlist": {
+                    "additional_metadata": {"algorithm_metadata": {
+                        "source_patch": "weekly-exploration"}}}}}}]}
+        if url.endswith("/playlist/x"):
+            return {"playlist": {"track": [
+                {"creator": "Someone New", "title": f"Fresh {i}"} for i in range(4)]}}
+        return None
+    made = {m.key: m for m in mixes.build(db, "ilay", NOW, opener=lb)}
+    ex = made["weekly-exploration"]
+    assert ex.tracks == [] and len(ex.missing) == 4
+    assert "0 of 4 in your library" in ex.subtitle
+
+
+def test_mix_screen_lists_missing_songs_without_playing_them():
+    import pygame
+    pygame.init()
+    from musi.player.screens.mix import MixScreen
+    from musi.player.mpd_client import PlayerStatus
+
+    class MPD:
+        calls = []
+        def set_shuffle(self, on): self.calls.append("shuffle")
+        def play_paths(self, p, start_index=0): self.calls.append("play")
+
+    class App:
+        stack = []; db = None; mpd = MPD()
+        def push(self, s): self.stack.append(s)
+        def request_poll(self): pass
+
+    mix = mixes.Mix("weekly-exploration", "Weekly Exploration", "0 of 2 in your library",
+                    [], missing=[("A", "One"), ("B", "Two")])
+    s = MixScreen(App(), mix)
+    assert s._rows() == 3                       # heading + two songs
+    st = PlayerStatus(state="stop", path="", title="", artist="", album="",
+                      elapsed=0.0, duration=0.0, volume=50, shuffle=False,
+                      repeat=False, queue_pos=-1, queue_len=0)
+    s.draw(pygame.Surface((320, 480)), st)      # must not raise
+    s.play()
+    s._sel = 1
+    from musi.player.input import Button
+    s.handle(Button.SELECT, st)
+    assert App.mpd.calls == []                  # nothing playable, nothing played

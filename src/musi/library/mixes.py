@@ -40,6 +40,7 @@ class Mix:
     subtitle: str
     tracks: list[dict] = field(default_factory=list)   # path, title, artist, duration
     colours: tuple = ((255, 92, 138), (122, 59, 255))  # card gradient
+    missing: list[tuple[str, str]] = field(default_factory=list)  # (artist, title) not owned
 
 
 # ── matching ListenBrainz names to library files ──────────────────────────────
@@ -86,13 +87,20 @@ class Library:
         return None
 
     def match_all(self, items: list[tuple[str, str]]) -> list[dict]:
-        out, seen = [], set()
+        return self.split(items)[0]
+
+    def split(self, items: list[tuple[str, str]]
+              ) -> tuple[list[dict], list[tuple[str, str]]]:
+        """(tracks you have, (artist, title) of the ones you don't)."""
+        out, missing, seen = [], [], set()
         for artist, title in items:
             t = self.find(artist, title)
-            if t and t["path"] not in seen:
+            if t is None:
+                missing.append((artist, title))
+            elif t["path"] not in seen:
                 seen.add(t["path"])
                 out.append(t)
-        return out
+        return out, missing
 
 
 # ── ListenBrainz (public endpoints) ───────────────────────────────────────────
@@ -244,14 +252,19 @@ def build(db, lb_user: str | None = None, now: float | None = None,
     for m in (day, rep, fav):
         if m:
             mixes.append(m)
+    # ListenBrainz's playlists are recommendations — often songs you don't
+    # own yet. Offer every one it made: the songs you have play, the rest are
+    # listed so you can see (and go get) what it suggested.
     for kind in ("daily-jams", "weekly-jams", "weekly-exploration"):
         if kind in generated:
             title, items = generated[kind]
-            tracks = lib.match_all(items)
-            if len(tracks) >= 3:
-                name, sub, cols = _LB_LOOK[kind]
-                have = f"{len(tracks)} of {len(items)} in your library"
-                mixes.append(Mix(kind, name, f"{sub} · {have}", tracks, cols))
+            if not items:
+                continue
+            tracks, missing = lib.split(items)
+            name, sub, cols = _LB_LOOK[kind]
+            have = f"{len(tracks)} of {len(items)} in your library"
+            mixes.append(Mix(kind, name, f"{sub} · {have}", tracks, cols,
+                             missing=missing))
     return mixes
 
 

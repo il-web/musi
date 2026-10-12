@@ -1,7 +1,9 @@
 """One Smart Mix (or a song radio) — play, shuffle, or start from any track.
 
 Read-only: a mix is rebuilt from your listening, so there is nothing to
-reorder or delete. Layout follows the Playlist screen.
+reorder or delete. Layout follows the Playlist screen. A ListenBrainz mix
+also lists, dimmed under "Not in your library", the songs it recommended that
+you don't have — they can't play, but you can see what to go get.
 """
 from __future__ import annotations
 
@@ -24,9 +26,14 @@ class MixScreen(ListScreen):
     def __init__(self, app, mix: mixes.Mix) -> None:
         super().__init__(app, item_h=ITEM_H, list_y=LIST_Y, nav_y=NAV_Y)
         self.mix = mix
-        self._klist.set_count(len(mix.tracks), reset=True)
+        self._klist.set_count(self._rows(), reset=True)
         self._title: pygame.Surface | None = None
         self._sub: pygame.Surface | None = None
+
+    def _rows(self) -> int:
+        """Playable tracks, then a heading and the missing songs (if any)."""
+        missing = self.mix.missing
+        return len(self.mix.tracks) + (1 + len(missing) if missing else 0)
 
     # ── draw ──────────────────────────────────────────────────────────────────
 
@@ -35,8 +42,9 @@ class MixScreen(ListScreen):
             self._title = theme.render(self.mix.title, 18, theme.WHITE, bold=True,
                                        max_width=248)
             n = len(self.mix.tracks)
-            self._sub = theme.render(f"{self.mix.subtitle} · {n} song{'s' if n != 1 else ''}",
-                                     11, theme.DIM, max_width=248)
+            sub = (self.mix.subtitle if self.mix.missing else
+                   f"{self.mix.subtitle} · {n} song{'s' if n != 1 else ''}")
+            self._sub = theme.render(sub, 11, theme.DIM, max_width=248)
         surface.fill(theme.BG)
         statusbar.draw(surface, status, audio_detect.get_audio_type(),
                        show_home=len(self.app.stack) > 1)
@@ -49,18 +57,39 @@ class MixScreen(ListScreen):
         surface.blit(self._title, (60, 30))
         surface.blit(self._sub, (60, 56))
 
-        pygame.draw.rect(surface, theme.ACCENT, PLAY_RECT, border_radius=21)
-        icons.draw_play(surface, PLAY_RECT.x + 30, PLAY_RECT.centery, theme.WHITE)
-        p = theme.render("Play", 13, theme.WHITE, bold=True)
+        live = bool(self.mix.tracks)          # nothing you own → buttons dimmed
+        pygame.draw.rect(surface, theme.ACCENT if live else theme.CARD_BG,
+                         PLAY_RECT, border_radius=21)
+        fg = theme.WHITE if live else theme.DIM
+        icons.draw_play(surface, PLAY_RECT.x + 30, PLAY_RECT.centery, fg)
+        p = theme.render("Play", 13, fg, bold=True)
         surface.blit(p, p.get_rect(x=PLAY_RECT.x + 46, centery=PLAY_RECT.centery))
         pygame.draw.rect(surface, theme.CARD_BG, SHUFFLE_RECT, border_radius=21)
-        pygame.draw.rect(surface, theme.ACCENT, SHUFFLE_RECT, 1, border_radius=21)
-        _draw_shuffle(surface, SHUFFLE_RECT.centerx, SHUFFLE_RECT.centery, theme.ACCENT)
+        pygame.draw.rect(surface, theme.ACCENT if live else theme.DIM,
+                         SHUFFLE_RECT, 1, border_radius=21)
+        _draw_shuffle(surface, SHUFFLE_RECT.centerx, SHUFFLE_RECT.centery,
+                      theme.ACCENT if live else theme.DIM)
 
-        self.draw_list_viewport(surface, len(self.mix.tracks))
+        self.draw_list_viewport(surface, self._rows())
         minibar.draw(surface, self.app, status)
 
     def _draw_row(self, surface: pygame.Surface, y: int, di: int) -> None:
+        n = len(self.mix.tracks)
+        if di == n:                           # "Not in your library" heading
+            h = theme.render(f"Not in your library · {len(self.mix.missing)}",
+                             11, theme.DIM, bold=True)
+            surface.blit(h, (14, y + ITEM_H - 6 - h.get_height()))
+            return
+        if di > n:                            # a recommended song you don't have
+            artist, title = self.mix.missing[di - n - 1]
+            pygame.draw.rect(surface, theme.CARD_BG, (8, y + 2, 304, ITEM_H - 6),
+                             1, border_radius=7)
+            surface.blit(theme.render(title or "?", 13, theme.DIM, max_width=272),
+                         (16, y + 8))
+            if artist:
+                surface.blit(theme.render(artist, 10, theme.DIM, max_width=272),
+                             (16, y + 28))
+            return
         t = self.mix.tracks[di]
         sel = di == self._sel and self._tap.pending
         pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG,
@@ -117,7 +146,8 @@ class MixScreen(ListScreen):
 
     def handle(self, button: Button, status: PlayerStatus) -> None:
         if button == Button.SELECT:
-            self.play(start=max(0, self._sel))
+            if self._sel < len(self.mix.tracks):     # not a missing-song row
+                self.play(start=max(0, self._sel))
         else:
             super().handle(button, status)
 
@@ -175,7 +205,7 @@ class _Radio(MixScreen):
             self._busy = False
             self.mix = self._ready
             self._title = None
-            self._klist.set_count(len(self.mix.tracks), reset=True)
+            self._klist.set_count(self._rows(), reset=True)
             self.play()
             return
         super().draw(surface, status)
