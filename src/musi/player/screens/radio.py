@@ -4,6 +4,9 @@ Home: your saved stations, then TuneIn's "local radio" for where the device
 is. Search opens a results list (TuneIn, falling back to Radio Browser —
 library/radio.py). Tap a station to play it; the heart on the right saves it.
 
+On top sits SUB/WAVE — your own AI-DJ station (library/subwave.py): connect
+it by address, play it, and send the DJ song requests.
+
 All network work (directory calls, tuning, logo downloads) runs on worker
 threads; draw() only reads the state they leave behind.
 """
@@ -14,7 +17,7 @@ import time
 
 import pygame
 
-from musi.library import radio, remote
+from musi.library import radio, remote, subwave
 from musi.player import art_cache, audio_detect, icons, minibar, radio_play, statusbar, theme
 from musi.player.input import Button
 from musi.player.list_screen import ListScreen
@@ -29,7 +32,8 @@ LOGO    = 40
 
 
 class _StationList(ListScreen):
-    """Rows of ("header", text) / ("note", text) / ("station", dict)."""
+    """Rows of ("header", text) / ("note", text) / ("station", dict) /
+    ("action", (key, label)) — a button row, see on_action."""
 
     title = "Radio"
 
@@ -89,6 +93,18 @@ class _StationList(ListScreen):
             n = theme.render(str(value), 11, theme.DIM, max_width=292)
             surface.blit(n, (14, y + (ITEM_H - n.get_height()) // 2))
             return
+        if kind == "action":
+            _key, label = value
+            sel = i == self._sel and self._tap.pending
+            rect = pygame.Rect(8, y + 2, 304, ITEM_H - 4)
+            pygame.draw.rect(surface, theme.ACCENT if sel else theme.CARD_BG, rect,
+                             border_radius=8)
+            pygame.draw.rect(surface, theme.ACCENT, rect, 1, border_radius=8)
+            col = theme.WHITE if sel else theme.ACCENT
+            icons.draw_plus(surface, 34, y + ITEM_H // 2, col)
+            lbl = theme.render(str(label), 13, col, bold=True, max_width=230)
+            surface.blit(lbl, (64, y + (ITEM_H - lbl.get_height()) // 2))
+            return
 
         st: dict = value                                    # a station
         sel = i == self._sel and self._tap.pending
@@ -142,6 +158,11 @@ class _StationList(ListScreen):
             return None
         if LIST_Y <= y < minibar.BAR_Y and not self._tap.pending:
             i = self._klist.index_at(y - LIST_Y)
+            if 0 <= i < len(self.rows) and self.rows[i][0] == "action":
+                self._sel = i
+                key = self.rows[i][1][0]
+                self._tap.set(lambda key=key: self.on_action(key))
+                return None
             if 0 <= i < len(self.rows) and self.rows[i][0] == "station":
                 st = self.rows[i][1]
                 if x >= HEART_X:
@@ -155,6 +176,9 @@ class _StationList(ListScreen):
 
     def on_saved_changed(self) -> None:
         """Hook: the home list rebuilds its "Saved" section."""
+
+    def on_action(self, key: str) -> None:
+        """Hook: a button row was tapped."""
 
     def _search(self) -> None:
         from musi.player.screens.text_entry import TextEntryScreen
@@ -187,6 +211,8 @@ class _StationList(ListScreen):
             kind, value = self.rows[self._sel]
             if kind == "station":
                 self.play(value)
+            elif kind == "action":
+                self.on_action(value[0])
         else:
             super().handle(button, status)
 
@@ -217,9 +243,77 @@ class RadioScreen(_StationList):
     def on_saved_changed(self) -> None:
         self._rebuild()
 
+    # ── SUB/WAVE ──────────────────────────────────────────────────────────────
+
+    def on_action(self, key: str) -> None:
+        from musi.player.screens.text_entry import TextEntryScreen
+        if key == "sw-connect":
+            cur = subwave.load()
+            self.app.push(TextEntryScreen(
+                self.app, "SUB/WAVE address", initial=cur["id"] if cur else "",
+                on_commit=self.connect_subwave, max_len=80))
+        elif key == "sw-request":
+            self.app.push(TextEntryScreen(
+                self.app, "Ask the DJ for…", on_commit=self.request_song, max_len=80))
+
+    def connect_subwave(self, address: str) -> None:
+        self.msg = "Looking for your station…"
+
+        def work() -> None:
+            try:
+                st = subwave.connect(address)
+                subwave.save(st)
+                self.msg = f"Connected to {st['name']}"
+            except (subwave.SubwaveError, OSError) as exc:
+                self.msg = f"Couldn't connect: {exc}"
+            self._rebuild()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def request_song(self, text: str) -> None:
+        st = subwave.load()
+        if not st:
+            return
+        self.msg = "Asking the DJ…"
+
+        def work() -> None:
+            try:
+                self.msg = subwave.request_and_wait(st, text)
+            except subwave.SubwaveError as exc:
+                self.msg = f"Request failed: {exc}"
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def handle_long_press(self, x: int, y: int) -> bool:
+        if not (LIST_Y <= y < minibar.BAR_Y):
+            return False
+        i = self._klist.index_at(y - LIST_Y)
+        row = self.rows[i] if 0 <= i < len(self.rows) else None
+        if row is None or row[0] != "station" or not subwave.is_subwave(row[1]):
+            return False
+        from musi.player.screens.context_menu import ContextMenuScreen
+
+        def disconnect() -> None:
+            subwave.forget()
+            self.msg = ""
+            self._rebuild()
+
+        self.app.push(ContextMenuScreen(self.app, "SUB/WAVE", [
+            ("Change address…", lambda: self.on_action("sw-connect")),
+            ("Disconnect",      disconnect),
+        ]))
+        return True
+
     def _rebuild(self) -> None:
-        saved = radio.saved()
-        rows: list[tuple[str, object]] = [("header", "Saved")]
+        sw = subwave.load()
+        rows: list[tuple[str, object]] = [("header", "SUB/WAVE")]
+        if sw:
+            rows += [("station", sw), ("action", ("sw-request", "Request a song"))]
+        else:
+            rows.append(("action", ("sw-connect", "Connect your SUB/WAVE station")))
+        # a saved SUB/WAVE stays in next/prev rotation but is listed once, above
+        saved = [s for s in radio.saved() if not subwave.is_subwave(s)]
+        rows.append(("header", "Saved"))
         if saved:
             rows += [("station", s) for s in saved]
         else:

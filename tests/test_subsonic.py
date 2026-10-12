@@ -381,6 +381,7 @@ def test_cloud_tag_is_baked_into_the_now_playing_title():
 
     scr = NowPlayingScreen.__new__(NowPlayingScreen)
     scr._prev_title, scr._prev_meta, scr._prev_elapsed = ("", False), "", -1
+    scr._sw_info = None
     scr._update_text_cache(S())
     tagged = scr._title_surf.get_width()
     S.path = "/m/up.flac"

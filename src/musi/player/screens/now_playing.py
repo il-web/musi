@@ -10,7 +10,7 @@ import pygame
 import json
 import time
 
-from musi.library import radio, remote
+from musi.library import radio, remote, subwave
 from musi.player import (airplay, art_cache, audio_detect, icons, motion, radio_play,
                          statusbar, theme)
 from musi.player.input import Button
@@ -106,6 +106,8 @@ class NowPlayingScreen(Screen):
         self._logo_wait: float = 0.0
         self._radio_msg: str = ""
         self._air_rev:   int = -1             # AirPlay cover version shown
+        self._sw_rev:    int = -1             # SUB/WAVE now-playing version shown
+        self._sw_info:   dict | None = None   # its track / DJ, from the API
 
         # album-art gesture: None, or [start_x, start_y, axis] while dragging
         self._art_drag: list | None = None
@@ -136,6 +138,8 @@ class NowPlayingScreen(Screen):
         if remote.kind(status.path) == "airplay" and \
                 airplay.snapshot()["art_rev"] != self._air_rev:
             self._load_airplay_art()            # the cover arrived after the title
+        if subwave.is_subwave(self._station):
+            self._update_subwave()              # polled on a thread, read here
         self._reload_fav(status)
         self._update_text_cache(status)
         live = remote.is_radio(status.path)
@@ -187,7 +191,7 @@ class NowPlayingScreen(Screen):
 
         # 6/7 — radio is live: no bar, no times, nothing to seek
         if live:
-            _draw_live(surface, accent, self._radio_msg)
+            _draw_live(surface, accent, self._radio_msg or self._dj_line())
 
         # 6 — progress bar (scrub preview while dragging)
         progress = self._drag_seek if self._drag_seek is not None else status.progress
@@ -420,6 +424,8 @@ class NowPlayingScreen(Screen):
         self._station     = None
         self._radio_msg   = ""
         self._logo_wait   = 0.0
+        self._sw_rev      = -1
+        self._sw_info     = None
 
         if remote.is_radio(status.path):
             self._station = radio.station_for(status.path)
@@ -448,6 +454,34 @@ class NowPlayingScreen(Screen):
         self._art = _radio_hero(st, path, self._accent)
         pending = not path and bool(st.get("image"))
         self._logo_wait = time.monotonic() + 1.0 if pending else 0.0
+
+    def _update_subwave(self) -> None:
+        """Your SUB/WAVE station: the real track, its cover and the DJ, from
+        the station's API (MPD only sees the stream's ICY title)."""
+        snap = subwave.live(self._station)
+        if snap["rev"] == self._sw_rev:
+            return
+        self._sw_rev = snap["rev"]
+        self._sw_info = snap["info"]
+        cover = snap["cover"]
+        art = art_cache.load_surface(str(cover), (320, 320)) if cover else None
+        if art is not None:
+            self._art = art
+            avg = pygame.transform.average_color(art)[:3]
+            self._accent = theme.brighten(avg, 1.6) if sum(avg) < 300 else avg
+        else:
+            self._load_radio_art()
+
+    def _dj_line(self) -> str:
+        info = self._sw_info
+        if not info or not info.get("dj"):
+            return ""
+        line = f"DJ {info['dj']}"
+        if info.get("show"):
+            line += f" · {info['show']}"
+        if info.get("listeners"):
+            line += f" · {info['listeners']} listening"
+        return line
 
     def _next_label(self, status: PlayerStatus):
         """'Next: <title>' from the queue — once per track change (one MPD
@@ -489,8 +523,12 @@ class NowPlayingScreen(Screen):
 
     def _update_text_cache(self, status: PlayerStatus) -> None:
         """Re-render text surfaces only when content changes."""
-        title = status.title or "musi"
-        meta  = f"{status.artist}" + (f"  ·  {status.album}" if status.album else "")
+        title, artist, album = status.title, status.artist, status.album
+        sw = self._sw_info
+        if sw and sw.get("title"):              # SUB/WAVE knows the real track
+            title, artist, album = sw["title"], sw.get("artist", ""), sw.get("album", "")
+        title = title or "musi"
+        meta  = f"{artist}" + (f"  ·  {album}" if album else "")
         kind  = remote.kind(status.path)
         key   = (title, kind)      # same title, other source
         tagged = kind in ("server", "radio", "airplay")
